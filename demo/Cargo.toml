@@ -1,0 +1,14 @@
+[package]
+name = "demo"
+version = "0.1.0"
+edition = "2018"
+build = "build.rs"
+
+[dependencies]
+dlopen = "0.1"
+dlopen_derive = "0.1"
+mold = { path = "../mold" }
+rand = "0.8"
+
+[build-dependencies]
+cc = "1"
