@@ -1,0 +1,27 @@
+[submodule "cassia/dawn"]
+	path = cassia/third_party/dawn
+	url = https://dawn.googlesource.com/dawn
+[submodule "cassia/third_party/abseil"]
+	path = cassia/third_party/abseil
+	url = https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp
+[submodule "cassia/third_party/tint"]
+	path = cassia/third_party/tint
+	url = https://dawn.googlesource.com/tint
+[submodule "cassia/third_party/jinja2"]
+	path = cassia/third_party/jinja2
+	url = https://chromium.googlesource.com/chromium/src/third_party/jinja2
+[submodule "cassia/third_party/SPIRV-Headers"]
+	path = cassia/third_party/SPIRV-Headers
+	url = https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Headers
+[submodule "cassia/third_party/SPIRV-Tools"]
+	path = cassia/third_party/SPIRV-Tools
+	url = https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools
+[submodule "cassia/third_party/markupsafe"]
+	path = cassia/third_party/markupsafe
+	url = https://chromium.googlesource.com/chromium/src/third_party/markupsafe
+[submodule "cassia/third_party/glm"]
+	path = cassia/third_party/glm
+	url = https://github.com/g-truc/glm.git
+[submodule "cassia/third_party/glfw"]
+	path = cassia/third_party/glfw
+	url = https://github.com/glfw/glfw
