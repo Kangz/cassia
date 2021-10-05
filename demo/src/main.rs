@@ -75,8 +75,7 @@ struct Cassia {
 fn render_with_cassia(width: usize, height: usize, composition: &mut Composition) {
     let pixel_segments = composition.pixel_segments();
 
-    let mut cont: Container<Cassia> =
-        unsafe { Container::load("../out/libcassia.so") }.unwrap();
+    let mut cont: Container<Cassia> = unsafe { Container::load("../out/libcassia.so") }.unwrap();
 
     unsafe {
         cont.cassia_init(width as u32, height as u32);
@@ -107,12 +106,7 @@ fn main() {
 
         composition.get_mut(layer_id).unwrap().set_props(Props {
             func: Func::Draw(Style {
-                fill: Fill::Solid([
-                    rng.gen(),
-                    rng.gen(),
-                    rng.gen(),
-                    1.0,
-                ]),
+                fill: Fill::Solid([rng.gen(), rng.gen(), rng.gen(), 1.0]),
                 ..Default::default()
             }),
             ..Default::default()
