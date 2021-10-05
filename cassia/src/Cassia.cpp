@@ -3,9 +3,108 @@
 #include <dawn_native/DawnNative.h>
 #include "GLFW/glfw3.h"
 #include "utils/GLFWUtils.h"
+#include "utils/WGPUHelpers.h"
 
 #include <iostream>
 #include <algorithm>
+
+wgpu::Buffer CreateBufferFromData(const wgpu::Device& device, wgpu::BufferUsage usage, const void* data, size_t size) {
+    wgpu::BufferDescriptor bufDesc;
+    bufDesc.size = size;
+    bufDesc.usage = usage;
+    bufDesc.mappedAtCreation = true;
+    wgpu::Buffer buffer = device.CreateBuffer(&bufDesc);
+    memcpy(buffer.GetMappedRange(), data, size);
+    buffer.Unmap();
+    return buffer;
+}
+
+class StupidComputeRenderer {
+    struct Uniforms {
+        uint32_t width;
+        uint32_t height;
+        uint32_t segmentCount;
+    };
+    static_assert(sizeof(Uniforms) == 12, "");
+
+  public:
+    StupidComputeRenderer(wgpu::Device device, uint32_t width, uint32_t height) : mDevice(device), mWidth(width), mHeight(height) {
+        wgpu::ShaderModule module = utils::CreateShaderModule(mDevice, R"(
+            [[block]] struct Config {
+                width: u32;
+                height: u32;
+                count: u32;
+            };
+            [[group(0), binding(0)]] var<uniform> config : Config;
+
+            struct PSegments {
+                u32: low;
+                u32: high;
+            };
+            // TODO define helpers to extract data from the PSegment
+
+            [[block]] struct PSegments {
+                array<PSegment> segments;
+            };
+            [[group(0), binding(1)]] var<storage> in : PSegments;
+            [[group(0), binding(2)]] var out : texture_storage_2d<rgba16floati, write>;
+
+            [[stage(compute), workgroup_size(8, 8)]]
+            fn main([[builtin(global_invocation_id)]] GlobalId : vec3<u32>) {
+                if (GlobalId.x >= config.width || GlobalId.y >= config.height) {
+                    return;
+                }
+
+                var accum = vec4<f32>(0.0);
+                for (var i = 0u; i < config.count; i = i + 1u) {
+                    var segment = in.segments[i];
+                    // TODO Computations, accumulator, if on our line and before us
+                }
+
+                textureStore(out, vec<i32>(GlobalId.xy), accum);
+            }
+        )");
+
+        wgpu::ComputePipelineDescriptor pDesc;
+        pDesc.compute.module = module;
+        pDesc.compute.entryPoint = "main";
+        mPipeline = mDevice.CreateComputePipeline(&pDesc);
+    }
+
+    wgpu::Texture Render(wgpu::Buffer sortedPsegments, uint32_t segmentCount) {
+        Uniforms u = {mWidth, mHeight, segmentCount};
+        wgpu::Buffer uniforms = CreateBufferFromData(mDevice, wgpu::BufferUsage::Uniform, &u, sizeof(u));
+
+        wgpu::TextureDescriptor texDesc;
+        texDesc.size = {mWidth, mHeight};
+        texDesc.usage = wgpu::TextureUsage::StorageBinding | wgpu::TextureUsage::TextureBinding;
+        texDesc.format = wgpu::TextureFormat::RGBA16Float;
+        wgpu::Texture outTexture = mDevice.CreateTexture(&texDesc);
+
+        wgpu::BindGroup bg = utils::MakeBindGroup(mDevice, mPipeline.GetBindGroupLayout(0), {
+            {0, uniforms},
+            {1, sortedPsegments},
+            {2, outTexture.CreateView()}
+        });
+
+        wgpu::CommandEncoder encoder = mDevice.CreateCommandEncoder();
+        wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+        pass.SetBindGroup(0, bg);
+        pass.SetPipeline(mPipeline);
+        pass.Dispatch(mWidth / 8 + 1, mHeight / 8 + 1);
+        pass.EndPass();
+
+        wgpu::CommandBuffer commands = encoder.Finish();
+        mDevice.GetQueue().Submit(1, &commands);
+
+        return outTexture;
+    }
+
+  private:
+    wgpu::ComputePipeline mPipeline;
+    wgpu::Device mDevice;
+    uint32_t mWidth, mHeight;
+};
 
 class Cassia {
   public:
@@ -51,7 +150,14 @@ class Cassia {
         std::vector<uint64_t> psegments(psegmentsIn, psegmentsIn + psegmentCount);
         std::sort(psegments.begin(), psegments.end());
 
-        // Now upload the data to the GPU, render to a buffer and blit on the screen!
+        wgpu::Buffer sortedPsegments =
+            CreateBufferFromData(mDevice, wgpu::BufferUsage::Storage, psegments.data(), psegments.size() * sizeof(uint64_t));
+
+        // TODO: Make a stupid renderer and call it to get a float16 storage texture from the pSegments.
+
+        // TODO Do a manual blit from the storage texture to the swapchain renderable texture.
+        // Use utils/ComboRenderPipelineDescriptor.h and the vertex_index trick where we index a constant
+        // array of positions in the vertex shader to make this easy to write.
     }
 
     ~Cassia() {
@@ -75,6 +181,9 @@ class Cassia {
 extern "C" {
     static Cassia* sCassia = nullptr;
 
+
+    // TODO make an actual header for this? So we can have a standalone program taking
+    // a psegment file and renders it to the screen?
     __attribute__((visibility("default"))) void cassia_init(uint32_t width, uint32_t height) {
         sCassia = new Cassia(width, height);
     }
