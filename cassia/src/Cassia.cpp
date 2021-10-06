@@ -33,14 +33,14 @@ namespace cassia {
             std::cout << "Using adapter " << adapterProperties.name << std::endl;
             mDevice = wgpu::Device::Acquire(adapter.CreateDevice());
             mDevice.SetUncapturedErrorCallback([](WGPUErrorType, const char* message, void*) {
-                    std::cerr << "Dawn error: " << message;
-                    }, nullptr);
+                std::cerr << "Dawn error: " << message;
+            }, nullptr);
             mQueue = mDevice.GetQueue();
 
             // Create the GLFW window
             glfwSetErrorCallback([](int code, const char* message) {
-                    std::cerr << "GLFW error: " << code << " - " << message << std::endl;
-                    });
+                std::cerr << "GLFW error: " << code << " - " << message << std::endl;
+            });
             if (!glfwInit()) {
                 return;
             }
@@ -103,6 +103,8 @@ namespace cassia {
         }
 
         void Render(const uint64_t* psegmentsIn, size_t psegmentCount) {
+            glfwPollEvents();
+
             // Sort using the CPU for now.
             std::vector<uint64_t> psegments(psegmentsIn, psegmentsIn + psegmentCount);
             std::sort(psegments.begin(), psegments.end());

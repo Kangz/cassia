@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <unistd.h>
 
 int main(int argc, const char**argv) {
     if (argc != 2) {
@@ -19,10 +20,9 @@ int main(int argc, const char**argv) {
     std::vector<char> content((std::istreambuf_iterator<char>(segmentFile)), std::istreambuf_iterator<char>());
 
     cassia_init(1000, 1000);
-    while(true) {
     cassia_render(reinterpret_cast<const uint64_t*>(content.data()), content.size() / 8);
-    }
-    //cassia_shutdown();
+    sleep(1);
+    cassia_shutdown();
 
     return 0;
 }
