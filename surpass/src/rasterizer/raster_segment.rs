@@ -6,7 +6,7 @@ use std::{cmp::Ordering, convert::TryFrom};
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::TILE_SHIFT;
+use crate::{TILE_WIDTH_SHIFT, TILE_HEIGHT_SHIFT};
 
 const NONE: u64 = 1 << 63;
 
@@ -143,11 +143,11 @@ bitfield! {
     #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Pod, Zeroable)]
     pub struct CompactSegment(u64) {
         is_none: u8[1],
-        tile_j: i16[15 - TILE_SHIFT],
-        tile_i: i16[16 - TILE_SHIFT],
+        tile_j: i16[15 - TILE_HEIGHT_SHIFT],
+        tile_i: i16[16 - TILE_WIDTH_SHIFT],
         layer: u16[16],
-        tile_y: u8[TILE_SHIFT],
-        tile_x: u8[TILE_SHIFT],
+        tile_y: u8[TILE_HEIGHT_SHIFT],
+        tile_x: u8[TILE_WIDTH_SHIFT],
         area: i16[10],
         cover: i8[6],
     }

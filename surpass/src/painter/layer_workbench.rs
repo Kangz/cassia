@@ -486,597 +486,593 @@ impl LayerWorkbench {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::borrow::Cow;
-
-    use crate::{
-        painter::Props,
-        simd::{i8x16, Simd},
-        PIXEL_WIDTH, TILE_SIZE,
-    };
-
-    impl<T: PartialEq, const N: usize> PartialEq<[T; N]> for MaskedVec<T> {
-        fn eq(&self, other: &[T; N]) -> bool {
-            self.iter_masked().map(|(_, val)| val).eq(other.iter())
-        }
-    }
-
-    #[test]
-    fn masked_vec() {
-        let mut v = MaskedVec::default();
-
-        v.extend([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-
-        for (i, &val) in v.iter_masked() {
-            if let 2 | 3 | 4 | 5 = val {
-                v.set_mask(i, false);
-            }
-
-            if val == 3 {
-                v.set_mask(i, true);
-            }
-        }
-
-        assert_eq!(v, [1, 3, 6, 7, 8, 9]);
-
-        for (i, &val) in v.iter_masked() {
-            if let 3 | 7 = val {
-                v.set_mask(i, false);
-            }
-        }
-
-        assert_eq!(v, [1, 6, 8, 9]);
-
-        for (i, &val) in v.iter_masked() {
-            if val == 8 {
-                v.skip_until(i);
-            }
-        }
-
-        assert_eq!(v, [8, 9]);
-    }
-
-    enum CoverType {
-        Partial,
-        Full,
-    }
-
-    fn cover(layer: u16, cover_type: CoverType) -> CoverCarry {
-        let cover = match cover_type {
-            CoverType::Partial => Cover {
-                covers: [i8x16::splat(1); TILE_SIZE / i8x16::LANES],
-            },
-            CoverType::Full => Cover {
-                covers: [i8x16::splat(PIXEL_WIDTH as i8); TILE_SIZE / i8x16::LANES],
-            },
-        };
-
-        CoverCarry { cover, layer }
-    }
-
-    fn segment(layer: u16) -> CompactSegment {
-        CompactSegment::new(0, 0, 0, layer, 0, 0, 0, 0)
-    }
-
-    #[test]
-    fn populate_layers() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct UnimplementedProps;
-
-        impl LayerProps for UnimplementedProps {
-            fn get(&self, _layer: u16) -> Cow<'_, Props> {
-                unimplemented!()
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([
-            cover(0, CoverType::Partial),
-            cover(3, CoverType::Partial),
-            cover(4, CoverType::Partial),
-        ]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[
-                segment(0),
-                segment(1),
-                segment(1),
-                segment(2),
-                segment(5),
-                segment(5),
-                segment(5),
-            ],
-            props: &UnimplementedProps,
-            previous_layers: Cell::default(),
-            clear_color: [0.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        assert_eq!(workbench.ids, [0, 1, 2, 3, 4, 5]);
-
-        assert_eq!(workbench.segment_ranges.len(), 4);
-        assert_eq!(workbench.segment_ranges.get(&0).cloned(), Some(0..=0));
-        assert_eq!(workbench.segment_ranges.get(&1).cloned(), Some(1..=2));
-        assert_eq!(workbench.segment_ranges.get(&2).cloned(), Some(3..=3));
-        assert_eq!(workbench.segment_ranges.get(&3).cloned(), None);
-        assert_eq!(workbench.segment_ranges.get(&4).cloned(), None);
-        assert_eq!(workbench.segment_ranges.get(&5).cloned(), Some(4..=6));
-
-        assert_eq!(workbench.queue_indices.len(), 3);
-        assert_eq!(workbench.queue_indices.get(&0).cloned(), Some(0));
-        assert_eq!(workbench.queue_indices.get(&1).cloned(), None);
-        assert_eq!(workbench.queue_indices.get(&2).cloned(), None);
-        assert_eq!(workbench.queue_indices.get(&3).cloned(), Some(1));
-        assert_eq!(workbench.queue_indices.get(&4).cloned(), Some(2));
-        assert_eq!(workbench.queue_indices.get(&5).cloned(), None);
-    }
-
-    #[test]
-    fn skip_unchanged() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, _layer: u16) -> Cow<'_, Props> {
-                unimplemented!()
-            }
-
-            fn is_unchanged(&self, layer: u16) -> bool {
-                layer < 5
-            }
-        }
-
-        let mut layers = Some(4);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[segment(0), segment(1), segment(2), segment(3), segment(4)],
-            props: &TestProps,
-            previous_layers: Cell::new(Some(&mut layers)),
-            clear_color: [0.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        // Optimization should fail because the number of layers changed.
-        assert_eq!(
-            workbench.tile_unchanged_pass(&context),
-            ControlFlow::Continue(())
-        );
-        assert_eq!(layers, Some(5));
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[segment(0), segment(1), segment(2), segment(3), segment(4)],
-            props: &TestProps,
-            previous_layers: Cell::new(Some(&mut layers)),
-            clear_color: [0.0; 4],
-        };
-
-        // Skip should occur because the previous pass updated the number of layers.
-        assert_eq!(
-            workbench.tile_unchanged_pass(&context),
-            ControlFlow::Break(TileWriteOp::None)
-        );
-        assert_eq!(layers, Some(5));
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[segment(1), segment(2), segment(3), segment(4), segment(5)],
-            props: &TestProps,
-            previous_layers: Cell::new(Some(&mut layers)),
-            clear_color: [0.0; 4],
-        };
-
-        workbench.next_tile();
-        workbench.populate_layers(&context);
-
-        // Optimization should fail because at least one layer changed.
-        assert_eq!(
-            workbench.tile_unchanged_pass(&context),
-            ControlFlow::Continue(())
-        );
-        assert_eq!(layers, Some(5));
-    }
-
-    #[test]
-    fn skip_full_clip() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, layer: u16) -> Cow<'_, Props> {
-                Cow::Owned(match layer {
-                    1 | 3 => Props {
-                        func: Func::Clip(1),
-                        ..Default::default()
-                    },
-                    _ => Props {
-                        func: Func::Draw(Style {
-                            is_clipped: layer == 2,
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
-                })
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([
-            cover(0, CoverType::Partial),
-            cover(1, CoverType::Full),
-            cover(2, CoverType::Partial),
-            cover(3, CoverType::Full),
-        ]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[],
-            props: &TestProps,
-            previous_layers: Cell::default(),
-            clear_color: [0.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        workbench.skip_trivial_clips_pass(&context);
-
-        assert_eq!(workbench.ids, [0, 2]);
-        assert!(!workbench.skip_clipping.contains(&0));
-        assert!(workbench.skip_clipping.contains(&2));
-    }
-
-    #[test]
-    fn skip_layer_outside_of_clip() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, _layer: u16) -> Cow<'_, Props> {
-                Cow::Owned(Props {
-                    func: Func::Draw(Style {
-                        is_clipped: true,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([cover(0, CoverType::Partial), cover(1, CoverType::Partial)]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[],
-            props: &TestProps,
-            previous_layers: Cell::default(),
-            clear_color: [0.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        workbench.skip_trivial_clips_pass(&context);
-
-        assert_eq!(workbench.ids, []);
-    }
-
-    #[test]
-    fn skip_without_layer_usage() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, layer: u16) -> Cow<'_, Props> {
-                Cow::Owned(match layer {
-                    1 | 4 => Props {
-                        func: Func::Clip(1),
-                        ..Default::default()
-                    },
-                    _ => Props::default(),
-                })
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([
-            cover(0, CoverType::Partial),
-            cover(1, CoverType::Partial),
-            cover(3, CoverType::Partial),
-            cover(4, CoverType::Partial),
-        ]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[],
-            props: &TestProps,
-            previous_layers: Cell::default(),
-            clear_color: [0.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        workbench.skip_trivial_clips_pass(&context);
-
-        assert_eq!(workbench.ids, [0, 3]);
-    }
-
-    #[test]
-    fn skip_everything_below_opaque() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, _layer: u16) -> Cow<'_, Props> {
-                Cow::Owned(Props::default())
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([
-            cover(0, CoverType::Partial),
-            cover(1, CoverType::Partial),
-            cover(2, CoverType::Full),
-        ]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[segment(3)],
-            props: &TestProps,
-            previous_layers: Cell::default(),
-            clear_color: [0.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        assert_eq!(
-            workbench.skip_fully_covered_layers(&context),
-            ControlFlow::Continue(())
-        );
-
-        assert_eq!(workbench.ids, [2, 3]);
-    }
-
-    #[test]
-    fn blend_top_full_layers() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, layer: u16) -> Cow<'_, Props> {
-                Cow::Owned(Props {
-                    func: Func::Draw(Style {
-                        fill: Fill::Solid([0.5; 4]),
-                        blend_mode: match layer {
-                            0 => BlendMode::Over,
-                            1 => BlendMode::Multiply,
-                            _ => unimplemented!(),
-                        },
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([cover(0, CoverType::Full), cover(1, CoverType::Full)]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[],
-            props: &TestProps,
-            previous_layers: Cell::default(),
-            clear_color: [0.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        assert_eq!(
-            workbench.skip_fully_covered_layers(&context),
-            ControlFlow::Break(TileWriteOp::Solid([0.1875, 0.1875, 0.1875, 0.75]))
-        );
-    }
-
-    #[test]
-    fn blend_top_full_layers_with_clear_color() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, _layer: u16) -> Cow<'_, Props> {
-                Cow::Owned(Props {
-                    func: Func::Draw(Style {
-                        fill: Fill::Solid([0.5; 4]),
-                        blend_mode: BlendMode::Multiply,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                })
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([cover(0, CoverType::Full), cover(1, CoverType::Full)]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[],
-            props: &TestProps,
-            previous_layers: Cell::default(),
-            clear_color: [1.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        assert_eq!(
-            workbench.skip_fully_covered_layers(&context),
-            ControlFlow::Break(TileWriteOp::Solid([0.5625, 0.5625, 0.5625, 1.0]))
-        );
-    }
-
-    #[test]
-    fn skip_fully_covered_layers_clip() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, layer: u16) -> Cow<'_, Props> {
-                Cow::Owned(Props {
-                    func: match layer {
-                        0 => Func::Clip(1),
-                        1 => Func::Draw(Style {
-                            blend_mode: BlendMode::Multiply,
-                            ..Default::default()
-                        }),
-                        _ => unimplemented!(),
-                    },
-                    ..Default::default()
-                })
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([cover(0, CoverType::Partial), cover(1, CoverType::Full)]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[],
-            props: &TestProps,
-            previous_layers: Cell::default(),
-            clear_color: [1.0; 4],
-        };
-
-        workbench.populate_layers(&context);
-
-        assert_eq!(
-            workbench.skip_fully_covered_layers(&context),
-            ControlFlow::Continue(())
-        );
-    }
-
-    #[test]
-    fn skip_clip_then_blend() {
-        let mut workbench = LayerWorkbench::default();
-
-        struct TestProps;
-
-        impl LayerProps for TestProps {
-            fn get(&self, layer: u16) -> Cow<'_, Props> {
-                Cow::Owned(Props {
-                    func: match layer {
-                        0 => Func::Clip(1),
-                        1 => Func::Draw(Style {
-                            fill: Fill::Solid([0.5; 4]),
-                            blend_mode: BlendMode::Multiply,
-                            ..Default::default()
-                        }),
-                        _ => unimplemented!(),
-                    },
-                    ..Default::default()
-                })
-            }
-
-            fn is_unchanged(&self, _layer: u16) -> bool {
-                unimplemented!()
-            }
-        }
-
-        struct UnimplementedPainter;
-
-        impl LayerPainter for UnimplementedPainter {
-            fn clear_cells(&mut self) {
-                unimplemented!();
-            }
-
-            fn acc_segment(&mut self, _segment: CompactSegment) {
-                unimplemented!();
-            }
-
-            fn acc_cover(&mut self, _cover: Cover) {
-                unimplemented!();
-            }
-
-            fn clear(&mut self, _color: [f32; 4]) {
-                unimplemented!();
-            }
-
-            fn paint_layer(
-                &mut self,
-                _tile_i: usize,
-                _tile_j: usize,
-                _layer: u16,
-                _props: &Props,
-                _apply_clip: bool,
-            ) -> Cover {
-                unimplemented!()
-            }
-        }
-
-        workbench.init([cover(0, CoverType::Partial), cover(1, CoverType::Full)]);
-
-        let context = Context {
-            tile_i: 0,
-            tile_j: 0,
-            segments: &[],
-            props: &TestProps,
-            previous_layers: Cell::default(),
-            clear_color: [1.0; 4],
-        };
-
-        assert_eq!(
-            workbench.drive_tile_painting(&mut UnimplementedPainter, &context),
-            TileWriteOp::Solid([0.75, 0.75, 0.75, 1.0])
-        );
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     use std::borrow::Cow;
+
+//     use crate::{PIXEL_WIDTH, TILE_HEIGHT, TILE_SIZE, painter::Props, simd::{i8x16, Simd}};
+
+//     impl<T: PartialEq, const N: usize> PartialEq<[T; N]> for MaskedVec<T> {
+//         fn eq(&self, other: &[T; N]) -> bool {
+//             self.iter_masked().map(|(_, val)| val).eq(other.iter())
+//         }
+//     }
+
+//     #[test]
+//     fn masked_vec() {
+//         let mut v = MaskedVec::default();
+
+//         v.extend([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+//         for (i, &val) in v.iter_masked() {
+//             if let 2 | 3 | 4 | 5 = val {
+//                 v.set_mask(i, false);
+//             }
+
+//             if val == 3 {
+//                 v.set_mask(i, true);
+//             }
+//         }
+
+//         assert_eq!(v, [1, 3, 6, 7, 8, 9]);
+
+//         for (i, &val) in v.iter_masked() {
+//             if let 3 | 7 = val {
+//                 v.set_mask(i, false);
+//             }
+//         }
+
+//         assert_eq!(v, [1, 6, 8, 9]);
+
+//         for (i, &val) in v.iter_masked() {
+//             if val == 8 {
+//                 v.skip_until(i);
+//             }
+//         }
+
+//         assert_eq!(v, [8, 9]);
+//     }
+
+//     enum CoverType {
+//         Partial,
+//         Full,
+//     }
+
+//     fn cover(layer: u16, cover_type: CoverType) -> CoverCarry {
+//         let cover = match cover_type {
+//             CoverType::Partial => Cover {
+//                 covers: [i8x16::splat(1); TILE_HEIGHT / i8x16::LANES],
+//             },
+//             CoverType::Full => Cover {
+//                 covers: [i8x16::splat(PIXEL_WIDTH as i8); TILE_HEIGHT / i8x16::LANES],
+//             },
+//         };
+
+//         CoverCarry { cover, layer }
+//     }
+
+//     fn segment(layer: u16) -> CompactSegment {
+//         CompactSegment::new(0, 0, 0, layer, 0, 0, 0, 0)
+//     }
+
+//     #[test]
+//     fn populate_layers() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct UnimplementedProps;
+
+//         impl LayerProps for UnimplementedProps {
+//             fn get(&self, _layer: u16) -> Cow<'_, Props> {
+//                 unimplemented!()
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([
+//             cover(0, CoverType::Partial),
+//             cover(3, CoverType::Partial),
+//             cover(4, CoverType::Partial),
+//         ]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[
+//                 segment(0),
+//                 segment(1),
+//                 segment(1),
+//                 segment(2),
+//                 segment(5),
+//                 segment(5),
+//                 segment(5),
+//             ],
+//             props: &UnimplementedProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [0.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         assert_eq!(workbench.ids, [0, 1, 2, 3, 4, 5]);
+
+//         assert_eq!(workbench.segment_ranges.len(), 4);
+//         assert_eq!(workbench.segment_ranges.get(&0).cloned(), Some(0..=0));
+//         assert_eq!(workbench.segment_ranges.get(&1).cloned(), Some(1..=2));
+//         assert_eq!(workbench.segment_ranges.get(&2).cloned(), Some(3..=3));
+//         assert_eq!(workbench.segment_ranges.get(&3).cloned(), None);
+//         assert_eq!(workbench.segment_ranges.get(&4).cloned(), None);
+//         assert_eq!(workbench.segment_ranges.get(&5).cloned(), Some(4..=6));
+
+//         assert_eq!(workbench.queue_indices.len(), 3);
+//         assert_eq!(workbench.queue_indices.get(&0).cloned(), Some(0));
+//         assert_eq!(workbench.queue_indices.get(&1).cloned(), None);
+//         assert_eq!(workbench.queue_indices.get(&2).cloned(), None);
+//         assert_eq!(workbench.queue_indices.get(&3).cloned(), Some(1));
+//         assert_eq!(workbench.queue_indices.get(&4).cloned(), Some(2));
+//         assert_eq!(workbench.queue_indices.get(&5).cloned(), None);
+//     }
+
+//     #[test]
+//     fn skip_unchanged() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, _layer: u16) -> Cow<'_, Props> {
+//                 unimplemented!()
+//             }
+
+//             fn is_unchanged(&self, layer: u16) -> bool {
+//                 layer < 5
+//             }
+//         }
+
+//         let mut layers = Some(4);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[segment(0), segment(1), segment(2), segment(3), segment(4)],
+//             props: &TestProps,
+//             previous_layers: Cell::new(Some(&mut layers)),
+//             clear_color: [0.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         // Optimization should fail because the number of layers changed.
+//         assert_eq!(
+//             workbench.tile_unchanged_pass(&context),
+//             ControlFlow::Continue(())
+//         );
+//         assert_eq!(layers, Some(5));
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[segment(0), segment(1), segment(2), segment(3), segment(4)],
+//             props: &TestProps,
+//             previous_layers: Cell::new(Some(&mut layers)),
+//             clear_color: [0.0; 4],
+//         };
+
+//         // Skip should occur because the previous pass updated the number of layers.
+//         assert_eq!(
+//             workbench.tile_unchanged_pass(&context),
+//             ControlFlow::Break(TileWriteOp::None)
+//         );
+//         assert_eq!(layers, Some(5));
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[segment(1), segment(2), segment(3), segment(4), segment(5)],
+//             props: &TestProps,
+//             previous_layers: Cell::new(Some(&mut layers)),
+//             clear_color: [0.0; 4],
+//         };
+
+//         workbench.next_tile();
+//         workbench.populate_layers(&context);
+
+//         // Optimization should fail because at least one layer changed.
+//         assert_eq!(
+//             workbench.tile_unchanged_pass(&context),
+//             ControlFlow::Continue(())
+//         );
+//         assert_eq!(layers, Some(5));
+//     }
+
+//     #[test]
+//     fn skip_full_clip() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, layer: u16) -> Cow<'_, Props> {
+//                 Cow::Owned(match layer {
+//                     1 | 3 => Props {
+//                         func: Func::Clip(1),
+//                         ..Default::default()
+//                     },
+//                     _ => Props {
+//                         func: Func::Draw(Style {
+//                             is_clipped: layer == 2,
+//                             ..Default::default()
+//                         }),
+//                         ..Default::default()
+//                     },
+//                 })
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([
+//             cover(0, CoverType::Partial),
+//             cover(1, CoverType::Full),
+//             cover(2, CoverType::Partial),
+//             cover(3, CoverType::Full),
+//         ]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[],
+//             props: &TestProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [0.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         workbench.skip_trivial_clips_pass(&context);
+
+//         assert_eq!(workbench.ids, [0, 2]);
+//         assert!(!workbench.skip_clipping.contains(&0));
+//         assert!(workbench.skip_clipping.contains(&2));
+//     }
+
+//     #[test]
+//     fn skip_layer_outside_of_clip() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, _layer: u16) -> Cow<'_, Props> {
+//                 Cow::Owned(Props {
+//                     func: Func::Draw(Style {
+//                         is_clipped: true,
+//                         ..Default::default()
+//                     }),
+//                     ..Default::default()
+//                 })
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([cover(0, CoverType::Partial), cover(1, CoverType::Partial)]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[],
+//             props: &TestProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [0.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         workbench.skip_trivial_clips_pass(&context);
+
+//         assert_eq!(workbench.ids, []);
+//     }
+
+//     #[test]
+//     fn skip_without_layer_usage() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, layer: u16) -> Cow<'_, Props> {
+//                 Cow::Owned(match layer {
+//                     1 | 4 => Props {
+//                         func: Func::Clip(1),
+//                         ..Default::default()
+//                     },
+//                     _ => Props::default(),
+//                 })
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([
+//             cover(0, CoverType::Partial),
+//             cover(1, CoverType::Partial),
+//             cover(3, CoverType::Partial),
+//             cover(4, CoverType::Partial),
+//         ]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[],
+//             props: &TestProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [0.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         workbench.skip_trivial_clips_pass(&context);
+
+//         assert_eq!(workbench.ids, [0, 3]);
+//     }
+
+//     #[test]
+//     fn skip_everything_below_opaque() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, _layer: u16) -> Cow<'_, Props> {
+//                 Cow::Owned(Props::default())
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([
+//             cover(0, CoverType::Partial),
+//             cover(1, CoverType::Partial),
+//             cover(2, CoverType::Full),
+//         ]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[segment(3)],
+//             props: &TestProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [0.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         assert_eq!(
+//             workbench.skip_fully_covered_layers(&context),
+//             ControlFlow::Continue(())
+//         );
+
+//         assert_eq!(workbench.ids, [2, 3]);
+//     }
+
+//     #[test]
+//     fn blend_top_full_layers() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, layer: u16) -> Cow<'_, Props> {
+//                 Cow::Owned(Props {
+//                     func: Func::Draw(Style {
+//                         fill: Fill::Solid([0.5; 4]),
+//                         blend_mode: match layer {
+//                             0 => BlendMode::Over,
+//                             1 => BlendMode::Multiply,
+//                             _ => unimplemented!(),
+//                         },
+//                         ..Default::default()
+//                     }),
+//                     ..Default::default()
+//                 })
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([cover(0, CoverType::Full), cover(1, CoverType::Full)]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[],
+//             props: &TestProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [0.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         assert_eq!(
+//             workbench.skip_fully_covered_layers(&context),
+//             ControlFlow::Break(TileWriteOp::Solid([0.1875, 0.1875, 0.1875, 0.75]))
+//         );
+//     }
+
+//     #[test]
+//     fn blend_top_full_layers_with_clear_color() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, _layer: u16) -> Cow<'_, Props> {
+//                 Cow::Owned(Props {
+//                     func: Func::Draw(Style {
+//                         fill: Fill::Solid([0.5; 4]),
+//                         blend_mode: BlendMode::Multiply,
+//                         ..Default::default()
+//                     }),
+//                     ..Default::default()
+//                 })
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([cover(0, CoverType::Full), cover(1, CoverType::Full)]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[],
+//             props: &TestProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [1.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         assert_eq!(
+//             workbench.skip_fully_covered_layers(&context),
+//             ControlFlow::Break(TileWriteOp::Solid([0.5625, 0.5625, 0.5625, 1.0]))
+//         );
+//     }
+
+//     #[test]
+//     fn skip_fully_covered_layers_clip() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, layer: u16) -> Cow<'_, Props> {
+//                 Cow::Owned(Props {
+//                     func: match layer {
+//                         0 => Func::Clip(1),
+//                         1 => Func::Draw(Style {
+//                             blend_mode: BlendMode::Multiply,
+//                             ..Default::default()
+//                         }),
+//                         _ => unimplemented!(),
+//                     },
+//                     ..Default::default()
+//                 })
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([cover(0, CoverType::Partial), cover(1, CoverType::Full)]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[],
+//             props: &TestProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [1.0; 4],
+//         };
+
+//         workbench.populate_layers(&context);
+
+//         assert_eq!(
+//             workbench.skip_fully_covered_layers(&context),
+//             ControlFlow::Continue(())
+//         );
+//     }
+
+//     #[test]
+//     fn skip_clip_then_blend() {
+//         let mut workbench = LayerWorkbench::default();
+
+//         struct TestProps;
+
+//         impl LayerProps for TestProps {
+//             fn get(&self, layer: u16) -> Cow<'_, Props> {
+//                 Cow::Owned(Props {
+//                     func: match layer {
+//                         0 => Func::Clip(1),
+//                         1 => Func::Draw(Style {
+//                             fill: Fill::Solid([0.5; 4]),
+//                             blend_mode: BlendMode::Multiply,
+//                             ..Default::default()
+//                         }),
+//                         _ => unimplemented!(),
+//                     },
+//                     ..Default::default()
+//                 })
+//             }
+
+//             fn is_unchanged(&self, _layer: u16) -> bool {
+//                 unimplemented!()
+//             }
+//         }
+
+//         struct UnimplementedPainter;
+
+//         impl LayerPainter for UnimplementedPainter {
+//             fn clear_cells(&mut self) {
+//                 unimplemented!();
+//             }
+
+//             fn acc_segment(&mut self, _segment: CompactSegment) {
+//                 unimplemented!();
+//             }
+
+//             fn acc_cover(&mut self, _cover: Cover) {
+//                 unimplemented!();
+//             }
+
+//             fn clear(&mut self, _color: [f32; 4]) {
+//                 unimplemented!();
+//             }
+
+//             fn paint_layer(
+//                 &mut self,
+//                 _tile_i: usize,
+//                 _tile_j: usize,
+//                 _layer: u16,
+//                 _props: &Props,
+//                 _apply_clip: bool,
+//             ) -> Cover {
+//                 unimplemented!()
+//             }
+//         }
+
+//         workbench.init([cover(0, CoverType::Partial), cover(1, CoverType::Full)]);
+
+//         let context = Context {
+//             tile_i: 0,
+//             tile_j: 0,
+//             segments: &[],
+//             props: &TestProps,
+//             previous_layers: Cell::default(),
+//             clear_color: [1.0; 4],
+//         };
+
+//         assert_eq!(
+//             workbench.drive_tile_painting(&mut UnimplementedPainter, &context),
+//             TileWriteOp::Solid([0.75, 0.75, 0.75, 1.0])
+//         );
+//     }
+// }
