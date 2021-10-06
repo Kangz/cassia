@@ -17,6 +17,8 @@ add_subdirectory("${THIRD_PARTY_DIR}/dawn")
 add_library(cassia SHARED
     src/Cassia.cpp
     src/Cassia.h
+    src/CommonWGSL.cpp
+    src/CommonWGSL.h
     src/NaiveComputeRasterizer.cpp
     src/NaiveComputeRasterizer.h
 )
