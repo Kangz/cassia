@@ -16,6 +16,9 @@ add_subdirectory("${THIRD_PARTY_DIR}/dawn")
 
 add_library(cassia SHARED
     src/Cassia.cpp
+    src/Cassia.h
+    src/NaiveComputeRasterizer.cpp
+    src/NaiveComputeRasterizer.h
 )
 target_link_libraries(cassia
     dawn_internal_config
@@ -24,3 +27,10 @@ target_link_libraries(cassia
     dawn_utils
     glfw
 )
+target_compile_definitions(cassia PRIVATE "CASSIA_IMPLEMENTATION")
+target_compile_definitions(cassia PUBLIC "CASSIA_SHARED_LIBRARY")
+
+add_executable(cassia_test
+    src/CassiaTest.cpp
+)
+target_link_libraries(cassia_test cassia)
