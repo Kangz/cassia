@@ -4,6 +4,8 @@
 
 use std::{cmp::Ordering, convert::TryFrom};
 
+use bytemuck::{Pod, Zeroable};
+
 use crate::TILE_SHIFT;
 
 const NONE: u64 = 1 << 63;
@@ -129,6 +131,7 @@ macro_rules! bitfield {
             $( , )?
         }
     ) => {
+        #[repr(transparent)]
         $(#[$($meta)*])?
         pub struct $name($type);
 
@@ -137,7 +140,7 @@ macro_rules! bitfield {
 }
 
 bitfield! {
-    #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Pod, Zeroable)]
     pub struct CompactSegment(u64) {
         is_none: u8[1],
         tile_j: i16[15 - TILE_SHIFT],

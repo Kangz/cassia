@@ -65,6 +65,18 @@ fn capture_to_file(width: usize, height: usize, composition: &mut Composition) {
     output.write(&bytes).unwrap();
 }
 
+fn segs_to_file(composition: &mut Composition) {
+    let pixel_segments = composition.pixel_segments();
+
+    let new_path = "circles.segs";
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(new_path)
+        .unwrap();
+    output.write(bytemuck::cast_slice(pixel_segments)).unwrap();
+}
+
 #[derive(WrapperApi)]
 struct Cassia {
     cassia_init: unsafe extern "C" fn(width: u32, height: u32),
@@ -87,7 +99,7 @@ fn render_with_cassia(width: usize, height: usize, composition: &mut Composition
 fn main() {
     let width = 1000;
     let height = 1000;
-    let circles = 100;
+    let circles = 1;
     let radius_range = 10.0..50.0;
 
     let mut composition = Composition::new();
@@ -113,6 +125,7 @@ fn main() {
         });
     }
 
-    // capture_to_file(width, height, &mut composition);
-    render_with_cassia(width, height, &mut composition);
+    capture_to_file(width, height, &mut composition);
+    segs_to_file(&mut composition);
+    // render_with_cassia(width, height, &mut composition);
 }
