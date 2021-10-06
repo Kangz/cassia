@@ -77,21 +77,39 @@ fn segs_to_file(composition: &mut Composition) {
     output.write(bytemuck::cast_slice(pixel_segments)).unwrap();
 }
 
+#[repr(C)]
+struct Styling {
+    fill_rule: u32,
+    fill: [f32; 4],
+    blend_mode: u32,
+}
+
 #[derive(WrapperApi)]
 struct Cassia {
     cassia_init: unsafe extern "C" fn(width: u32, height: u32),
-    cassia_render: unsafe extern "C" fn(pixel_segments: *const u64, len: usize),
+    cassia_render: unsafe extern "C" fn(
+        pixel_segments: *const u64,
+        pixel_segments_len: usize,
+        stylings: *const Styling,
+        stylings_len: usize,
+    ),
     cassia_shutdown: unsafe extern "C" fn(),
 }
 
-fn render_with_cassia(width: usize, height: usize, composition: &mut Composition) {
+fn render_with_cassia(width: usize, height: usize, composition: &mut Composition, stylings: &[Styling]) {
     let pixel_segments = composition.pixel_segments();
 
     let mut cont: Container<Cassia> = unsafe { Container::load("../out/libcassia.so") }.unwrap();
 
     unsafe {
         cont.cassia_init(width as u32, height as u32);
-        cont.cassia_render(pixel_segments.as_ptr() as *const _, pixel_segments.len());
+        cont.cassia_render(
+            pixel_segments.as_ptr() as *const _,
+            pixel_segments.len(),
+            stylings.as_ptr(),
+            stylings.len(),
+        );
+        std::thread::sleep(std::time::Duration::from_secs(10));
         cont.cassia_shutdown();
     }
 }
@@ -99,10 +117,11 @@ fn render_with_cassia(width: usize, height: usize, composition: &mut Composition
 fn main() {
     let width = 1000;
     let height = 1000;
-    let circles = 100;
+    let circles = 1;
     let radius_range = 10.0..50.0;
 
     let mut composition = Composition::new();
+    let mut stylings = Vec::new();
     let mut rng = StdRng::seed_from_u64(42);
 
     for _ in 0..circles {
@@ -116,16 +135,24 @@ fn main() {
             ),
         );
 
+        let color = [rng.gen(), rng.gen(), rng.gen(), 1.0];
+
         composition.get_mut(layer_id).unwrap().set_props(Props {
             func: Func::Draw(Style {
-                fill: Fill::Solid([rng.gen(), rng.gen(), rng.gen(), 1.0]),
+                fill: Fill::Solid(color),
                 ..Default::default()
             }),
             ..Default::default()
         });
+
+        stylings.push(Styling {
+            fill_rule: 0,
+            fill: color,
+            blend_mode: 0,
+        });
     }
 
-    capture_to_file(width, height, &mut composition);
-    segs_to_file(&mut composition);
-    // render_with_cassia(width, height, &mut composition);
+    // capture_to_file(width, height, &mut composition);
+    // segs_to_file(&mut composition);
+    render_with_cassia(width, height, &mut composition, &stylings);
 }

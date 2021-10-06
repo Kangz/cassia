@@ -22,16 +22,28 @@ namespace cassia {
             };
             [[group(0), binding(0)]] var<uniform> config : Config;
 
+            struct Styling {
+                fill_rule: u32;
+                fill: array<f32, 4>;
+                blend_mode: u32;
+            };
+
             // TODO define helpers to extract data from the PSegment
 
             [[block]] struct PSegments {
-                segments: array<PSegment>;
+                data: array<PSegment>;
             };
-            [[group(0), binding(1)]] var<storage> in : PSegments;
-            [[group(0), binding(2)]] var out : texture_storage_2d<rgba16float, write>;
+            [[block]] struct Stylings {
+                data: array<Styling>;
+            };
+            [[group(0), binding(1)]] var<storage> segments : PSegments;
+            [[group(0), binding(2)]] var<storage> stylings : Stylings;
+            [[group(0), binding(3)]] var out : texture_storage_2d<rgba16float, write>;
 
             [[stage(compute), workgroup_size(8, 8)]]
             fn main([[builtin(global_invocation_id)]] GlobalId : vec3<u32>) {
+                ignore(stylings);
+
                 if (GlobalId.x >= config.width || GlobalId.y >= config.height) {
                     return;
                 }
@@ -40,7 +52,7 @@ namespace cassia {
                 var cover = 0.0;
                 var area = 0.0;
                 for (var i = 0u; i < config.count; i = i + 1u) {
-                    var segment = in.segments[i];
+                    var segment = segments.data[i];
                     if (psegment_is_none(segment)) {
                         continue;
                     }
@@ -58,7 +70,11 @@ namespace cassia {
                     }
                 }
 
-                var greyscale = vec4<f32>(vec3<f32>(cover + area), 1.0);
+                var layer_id = psegment_layer_id(segments.data[0]);
+
+                var fill = stylings.data[0].fill;
+                var color = vec3<f32>(fill[0], fill[1], fill[2]);
+                var greyscale = vec4<f32>(color * (cover + area), fill[3]);
 
                 textureStore(out, vec2<i32>(GlobalId.xy), greyscale);
             }
@@ -73,7 +89,7 @@ namespace cassia {
     }
 
     wgpu::Texture NaiveComputeRasterizer::Rasterize(const wgpu::ComputePassEncoder& pass,
-            wgpu::Buffer sortedPsegments, const Config& config) {
+            wgpu::Buffer sortedPsegments, wgpu::Buffer stylingsBuffer, const Config& config) {
         wgpu::Buffer uniforms = utils::CreateBufferFromData(
                 mDevice, &config, sizeof(Config), wgpu::BufferUsage::Uniform);
 
@@ -87,7 +103,8 @@ namespace cassia {
         wgpu::BindGroup bg = utils::MakeBindGroup(mDevice, mPipeline.GetBindGroupLayout(0), {
                 {0, uniforms},
                 {1, sortedPsegments},
-                {2, outTexture.CreateView()}
+                {2, stylingsBuffer},
+                {3, outTexture.CreateView()}
                 });
 
         pass.PushDebugGroup("naive raster");

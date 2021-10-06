@@ -103,7 +103,12 @@ namespace cassia {
             mRasterizer = std::make_unique<NaiveComputeRasterizer>(mDevice);
         }
 
-        void Render(const uint64_t* psegmentsIn, size_t psegmentCount) {
+        void Render(
+            const uint64_t* psegmentsIn,
+            size_t psegmentCount,
+            const Styling* stylings,
+            size_t stylingCount
+        ) {
             glfwPollEvents();
 
             // Sort using the CPU for now.
@@ -113,13 +118,16 @@ namespace cassia {
             wgpu::Buffer sortedPsegments = utils::CreateBufferFromData(
                     mDevice, psegments.data(), psegments.size() * sizeof(uint64_t),
                     wgpu::BufferUsage::Storage);
+            wgpu::Buffer stylingsBuffer = utils::CreateBufferFromData(
+                    mDevice, stylings, stylingCount * sizeof(Styling),
+                    wgpu::BufferUsage::Storage);
 
             // Run all the steps of the algorithm.
             wgpu::CommandEncoder encoder = mDevice.CreateCommandEncoder();
             wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
 
             NaiveComputeRasterizer::Config config = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-            wgpu::Texture picture = mRasterizer->Rasterize(pass, sortedPsegments, config);
+            wgpu::Texture picture = mRasterizer->Rasterize(pass, sortedPsegments, stylingsBuffer, config);
 
             pass.EndPass();
 
@@ -187,8 +195,13 @@ void cassia_init(uint32_t width, uint32_t height) {
     cassia::sCassia = std::make_unique<cassia::Cassia>(width, height);
 }
 
-void cassia_render(const uint64_t* psegments, size_t psegmentCount) {
-    cassia::sCassia->Render(psegments, psegmentCount);
+void cassia_render(
+    const uint64_t* psegments,
+    size_t psegmentCount,
+    const Styling* stylings,
+    size_t stylingCount
+) {
+    cassia::sCassia->Render(psegments, psegmentCount, stylings, stylingCount);
 }
 
 void cassia_shutdown() {

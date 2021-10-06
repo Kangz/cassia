@@ -22,9 +22,20 @@
 #    define CASSIA_EXPORT
 #endif  // defined(CASSIA_SHARED_LIBRARY)
 
+typedef struct Styling {
+    uint32_t fill_rule;
+    float fill[4];
+    uint32_t blend_mode;
+} Styling;
+
 extern "C" {
     CASSIA_EXPORT void cassia_init(uint32_t width, uint32_t height);
-    CASSIA_EXPORT void cassia_render(const uint64_t* psegments, size_t psegmentCount);
+    CASSIA_EXPORT void cassia_render(
+        const uint64_t* psegments,
+        size_t psegmentCount,
+        const Styling* stylings,
+        size_t stylingCount
+    );
     CASSIA_EXPORT void cassia_shutdown();
 }
 

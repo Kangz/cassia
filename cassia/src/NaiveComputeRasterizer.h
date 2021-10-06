@@ -15,7 +15,8 @@ namespace cassia {
             uint32_t segmentCount;
         };
         wgpu::Texture Rasterize(const wgpu::ComputePassEncoder& pass,
-                             wgpu::Buffer sortedPsegments, const Config& config);
+            wgpu::Buffer sortedPsegments, wgpu::Buffer stylingsBuffer,
+            const Config& config);
 
       private:
         wgpu::Device mDevice;
