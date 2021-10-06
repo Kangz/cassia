@@ -95,7 +95,8 @@ namespace cassia {
             pDesc.cFragment.module = blitModule;
             pDesc.cFragment.entryPoint = "fsMain";
             pDesc.cTargets[0].format = wgpu::TextureFormat::BGRA8Unorm;
-            pDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+            pDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleStrip;
+            pDesc.primitive.stripIndexFormat = wgpu::IndexFormat::Uint32;
             mBlitPipeline = mDevice.CreateRenderPipeline(&pDesc);
 
             // Create sub components
@@ -138,7 +139,7 @@ namespace cassia {
                 wgpu::RenderPassEncoder blitPass = encoder.BeginRenderPass(&rpDesc);
                 blitPass.SetPipeline(mBlitPipeline);
                 blitPass.SetBindGroup(0, blitBindGroup);
-                blitPass.Draw(3);
+                blitPass.Draw(4);
                 blitPass.EndPass();
             }
             encoder.PopDebugGroup();

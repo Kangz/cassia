@@ -18,10 +18,59 @@ namespace cassia {
             };
             [[group(0), binding(0)]] var<uniform> config : Config;
 
+            // const TILE_WIDTH: usize = 8;
+            // const TILE_WIDTH_SHIFT: usize = 3
+            // const TILE_WIDTH_MASK: usize = 7;
+            //
+            // pub const TILE_HEIGHT: usize = 64;
+            // const TILE_HEIGHT_SHIFT: usize = 6;
+            // const TILE_HEIGHT_MASK: usize = 63;
+            //
+            // pub struct CompactSegment(u64) {
+            //     is_none: u8[1],
+            //     tile_y: i16[15 - TILE_HEIGHT_SHIFT],
+            //     tile_x: i16[16 - TILE_WIDTH_SHIFT],
+            //     layer: u16[16],
+            //     local_y: u8[TILE_HEIGHT_SHIFT],
+            //     local_x: u8[TILE_WIDTH_SHIFT],
+            //     area: i16[10],
+            //     cover: i8[6],
+            // }
+
             struct PSegment {
-                low: u32;
-                high: u32;
+                lo: u32;
+                hi: u32;
             };
+
+            let TILE_WIDTH_SHIFT = 3u;
+            let TILE_HEIGHT_SHIFT = 6u;
+            let COVER_DIVISOR = 16.0;
+            let AREA_DIVISOR = 256.0;
+
+            fn psegment_is_none(s : PSegment) -> bool {
+                return bool(s.hi & (1u << 31u));
+            }
+            fn psegment_tile_x(s : PSegment) -> i32 {
+                return (i32(s.hi) << (16u - TILE_HEIGHT_SHIFT)) >> (16u + TILE_WIDTH_SHIFT);
+            }
+            fn psegment_tile_y(s : PSegment) -> i32{
+                return (i32(s.hi) << 1u) >> (17u + TILE_HEIGHT_SHIFT);
+            }
+            fn psegment_local_x(s : PSegment) -> u32 {
+                let mask = (1u << TILE_WIDTH_SHIFT) - 1u;
+                return (s.lo >> 16u) & mask;
+            }
+            fn psegment_local_y(s : PSegment) -> u32{
+                let mask = (1u << TILE_HEIGHT_SHIFT) - 1u;
+                return (s.lo >> (16u + TILE_WIDTH_SHIFT)) & mask;
+            }
+            fn psegment_area(s : PSegment) -> i32{
+                return i32(s.lo << 16u) >> 22u;
+            }
+            fn psegment_cover(s : PSegment) -> i32{
+                return i32(s.lo << 26u) >> 26u;
+            }
+
             // TODO define helpers to extract data from the PSegment
 
             [[block]] struct PSegments {
@@ -35,14 +84,32 @@ namespace cassia {
                 if (GlobalId.x >= config.width || GlobalId.y >= config.height) {
                     return;
                 }
+                var pos = vec2<i32>(GlobalId.xy);
 
-                var accum = vec4<f32>(0.0);
+                var cover = 0.0;
+                var area = 0.0;
                 for (var i = 0u; i < config.count; i = i + 1u) {
                     var segment = in.segments[i];
-                    // TODO Computations, accumulator, if on our line and before us
+                    if (psegment_is_none(segment)) {
+                        continue;
+                    }
+
+                    var y = (psegment_tile_y(segment) << TILE_HEIGHT_SHIFT) + i32(psegment_local_y(segment));
+                    if (y != pos.y) {
+                        continue;
+                    }
+
+                    var x = (psegment_tile_x(segment) << TILE_WIDTH_SHIFT) + i32(psegment_local_x(segment));
+                    if (x < pos.x) {
+                        cover = cover + f32(psegment_cover(segment)) / COVER_DIVISOR;
+                    } elseif (x == pos.x) {
+                        area = area + f32(psegment_area(segment)) / AREA_DIVISOR;
+                    }
                 }
 
-                textureStore(out, vec2<i32>(GlobalId.xy), accum);
+                var greyscale = vec4<f32>(vec3<f32>(cover + area), 1.0);
+
+                textureStore(out, vec2<i32>(GlobalId.xy), greyscale);
             }
         )");
 
