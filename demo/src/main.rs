@@ -1,5 +1,6 @@
 use std::{fs::OpenOptions, io::Write};
 
+use bytemuck::{Pod, Zeroable};
 use dlopen::wrapper::{Container, WrapperApi};
 use dlopen_derive::WrapperApi;
 use mold::{Buffer, Composition, Fill, Func, Path, Point, Props, Style};
@@ -77,7 +78,18 @@ fn segs_to_file(composition: &mut Composition) {
     output.write(bytemuck::cast_slice(pixel_segments)).unwrap();
 }
 
+fn stylings_to_file(stylings: &[Styling]) {
+    let new_path = "circles.stylings";
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(new_path)
+        .unwrap();
+    output.write(bytemuck::cast_slice(stylings)).unwrap();
+}
+
 #[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 struct Styling {
     fill_rule: u32,
     fill: [f32; 4],
@@ -154,5 +166,6 @@ fn main() {
 
     // capture_to_file(width, height, &mut composition);
     // segs_to_file(&mut composition);
+    // stylings_to_file(&stylings);
     render_with_cassia(width, height, &mut composition, &stylings);
 }

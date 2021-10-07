@@ -5,7 +5,7 @@ edition = "2018"
 build = "build.rs"
 
 [dependencies]
-bytemuck = "1"
+bytemuck = { version = "1", feature = ["derive"] }
 dlopen = "0.1"
 dlopen_derive = "0.1"
 mold = { path = "../mold" }
