@@ -2,6 +2,7 @@
 
 #include "EncodingContext.h"
 #include "NaiveComputeRasterizer.h"
+#include "TileWorkgroupRasterizer.h"
 
 #include <webgpu/webgpu_cpp.h>
 #include <dawn/dawn_proc.h>
@@ -118,7 +119,8 @@ namespace cassia {
             mBlitPipeline = mDevice.CreateRenderPipeline(&pDesc);
 
             // Create sub components
-            mRasterizer = std::make_unique<NaiveComputeRasterizer>(mDevice);
+            mNaiveRasterizer = std::make_unique<NaiveComputeRasterizer>(mDevice);
+            mTileRasterizer = std::make_unique<TileWorkgroupRasterizer>(mDevice);
         }
 
         void Render(
@@ -144,7 +146,7 @@ namespace cassia {
             EncodingContext context(mDevice, mTimestampsSupported);
 
             NaiveComputeRasterizer::Config config = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-            wgpu::Texture picture = mRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, config);
+            wgpu::Texture picture = mNaiveRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, config);
 
             // Do the blit into the swapchain.
             {
@@ -171,7 +173,8 @@ namespace cassia {
         }
 
         ~Cassia() {
-            mRasterizer = nullptr;
+            mNaiveRasterizer = nullptr;
+            mTileRasterizer = nullptr;
 
             mBlitPipeline = nullptr;
             mWindow = nullptr;
@@ -185,7 +188,8 @@ namespace cassia {
         }
 
       private:
-        std::unique_ptr<NaiveComputeRasterizer> mRasterizer;
+        std::unique_ptr<NaiveComputeRasterizer> mNaiveRasterizer;
+        std::unique_ptr<TileWorkgroupRasterizer> mTileRasterizer;
 
         wgpu::RenderPipeline mBlitPipeline;
         wgpu::Queue mQueue;

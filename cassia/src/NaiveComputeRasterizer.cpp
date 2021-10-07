@@ -41,8 +41,6 @@ namespace cassia {
 
             [[stage(compute), workgroup_size(8, 8)]]
             fn main([[builtin(global_invocation_id)]] GlobalId : vec3<u32>) {
-                ignore(stylings);
-
                 if (GlobalId.x >= config.width || GlobalId.y >= config.height) {
                     return;
                 }

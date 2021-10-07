@@ -23,6 +23,8 @@ add_library(cassia SHARED
     src/EncodingContext.h
     src/NaiveComputeRasterizer.cpp
     src/NaiveComputeRasterizer.h
+    src/TileWorkgroupRasterizer.cpp
+    src/TileWorkgroupRasterizer.h
 )
 target_link_libraries(cassia
     dawn_internal_config

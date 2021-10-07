@@ -64,7 +64,7 @@ namespace cassia {
         }
     )";
 
-    const char kPSegmentWGSL[] = R"(
+    const char kSylingWGSL[] = R"(
         let LAST_BYTE_MASK: i32 = 255;
         let LAST_BIT_MASK: i32 = 1;
 
