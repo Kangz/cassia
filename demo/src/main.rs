@@ -91,9 +91,10 @@ fn stylings_to_file(stylings: &[Styling]) {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Styling {
-    fill_rule: u32,
     fill: [f32; 4],
+    fill_rule: u32,
     blend_mode: u32,
+    _padding: [u32; 2],
 }
 
 #[derive(WrapperApi)]
@@ -163,14 +164,15 @@ fn main() {
         });
 
         stylings.push(Styling {
-            fill_rule: 0,
             fill: color,
+            fill_rule: 0,
             blend_mode: 0,
+            _padding: [0, 0],
         });
     }
 
     // capture_to_file(width, height, &mut composition);
-    // segs_to_file(&mut composition);
-    // stylings_to_file(&stylings);
+    segs_to_file(&mut composition);
+    stylings_to_file(&stylings);
     render_with_cassia(width, height, &mut composition, &stylings);
 }

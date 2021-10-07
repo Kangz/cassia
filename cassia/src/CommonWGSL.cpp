@@ -32,9 +32,12 @@ namespace cassia {
         // Also keep the constants in CommonWGSL.h in sync.
         let TILE_WIDTH_SHIFT = 3u;
         let TILE_HEIGHT_SHIFT = 3u;
+        let TILE_X_OFFSET = 256;
+        let PIXEL_SIZE = 16;
+
+        // TODO remove when all rasterizers use StylingWGSL
         let COVER_DIVISOR = 16.0;
         let AREA_DIVISOR = 256.0;
-        let TILE_X_OFFSET = 256;
 
         fn psegment_is_none(s : PSegment) -> bool {
             return bool(s.hi & (1u << 31u));
@@ -66,26 +69,39 @@ namespace cassia {
         }
     )";
 
-    const char kSylingWGSL[] = R"(
+    const char kStylingWGSL[] = R"(
         let LAST_BYTE_MASK: i32 = 255;
         let LAST_BIT_MASK: i32 = 1;
 
+        struct Styling {
+            fill: vec4<f32>;
+            fill_rule: u32;
+            blend_mode: u32;
+        };
+
         fn from_area(area: i32, fill_rule: u32) -> f32 {
             // NonZero
-            if (fill_rule == 0u) {
-                return clamp(abs(f32(area) / 256.0), 0.0, 1.0);
-            // EvenOdd
-            } else {
-                let number = area >> 8u;
-                let masked = f32(area & LAST_BYTE_MASK);
-                let capped = masked / 256.0;
+            switch (fill_rule) {
+                // NonZero
+                case 0u: {
+                    return clamp(abs(f32(area) / 256.0), 0.0, 1.0);
+                }
+                // EvenOdd
+                default: {
+                    let number = area >> 8u;
+                    let masked = f32(area & LAST_BYTE_MASK);
+                    let capped = masked / 256.0;
 
-                if ((number & LAST_BIT_MASK) == 0) {
-                    return capped;
-                } else {
-                    return 1.0 - capped;
+                    if ((number & LAST_BIT_MASK) == 0) {
+                        return capped;
+                    } else {
+                        return 1.0 - capped;
+                    }
                 }
             }
+
+            // TODO remove when Tint is fixed
+            return 0.0;
         }
 
         fn blend(dst: vec4<f32>, src: vec4<f32>, blend_mode: u32) -> vec4<f32> {
@@ -94,82 +110,121 @@ namespace cassia {
 
             var color: vec3<f32>;
             let dst_color = dst.xyz;
-            let src_color = src.xyz;
+            let src_color = src.xyz * alpha;
 
-            // Over
-            if (blend_mode == 0u) {
-                color = src_color;
-            // Multiply
-            } elseif (blend_mode == 1u) {
-                color = dst_color * src_color;
-            // Screen
-            } elseif (blend_mode == 2u) {
-                color = fma(dst_color, -src_color, src_color);
-            // Overlay
-            } elseif (blend_mode == 3u) {
-                color = 2.0 * select(
-                    (dst_color + src_color - fma(dst_color, src_color, vec3<f32>(0.5))),
-                    dst_color * src_color,
-                    src_color <= vec3<f32>(0.5),
-                );
-            // Darken
-            } elseif (blend_mode == 4u) {
-                color = min(dst_color, src_color);
-            // Lighten
-            } elseif (blend_mode == 5u) {
-                color = max(dst_color, src_color);
-            // ColorDodge
-            } elseif (blend_mode == 6u) {
-                color = select(
-                    min(vec3<f32>(1.0), src_color / (vec3<f32>(1.0) - dst_color)),
-                    vec3<f32>(0.0),
-                    src_color == vec3<f32>(0.0),
-                );
-            // ColorBurn
-            } elseif (blend_mode == 7u) {
-                color = select(
-                    vec3<f32>(1.0) - min(vec3<f32>(1.0), (vec3<f32>(1.0) - src_color) / dst_color),
-                    vec3<f32>(1.0),
-                    src_color == vec3<f32>(1.0),
-                );
-            // HardLight
-            } elseif (blend_mode == 8u) {
-                color = 2.0 * select(
-                    dst_color + src_color - fma(dst_color, src_color, vec3<f32>(0.5)),
-                    dst_color * src_color,
-                    dst_color <= vec3<f32>(0.5),
-                );
-            // SoftLight
-            } elseif (blend_mode == 9u) {
-                let d = select(
-                    sqrt(src_color),
-                    src_color * fma(
-                        fma(vec3<f32>(16.0), src_color, vec3<f32>(-12.0)),
+            switch (blend_mode) {
+                // Over
+                case 0u: {
+                    color = src_color;
+
+                    break;
+                }
+                // Multiply
+                case 1u: {
+                    color = dst_color * src_color;
+
+                    break;
+                }
+                // Screen
+                case 2u: {
+                    color = fma(dst_color, -src_color, src_color);
+
+                    break;
+                }
+                // Overlay
+                case 3u: {
+                    color = 2.0 * select(
+                        (dst_color + src_color - fma(dst_color, src_color, vec3<f32>(0.5))),
+                        dst_color * src_color,
+                        src_color <= vec3<f32>(0.5),
+                    );
+
+                    break;
+                }
+                // Darken
+                case 4u: {
+                    color = min(dst_color, src_color);
+
+                    break;
+                }
+                // Lighten
+                case 5u: {
+                    color = max(dst_color, src_color);
+
+                    break;
+                }
+                // ColorDodge
+                case 6u: {
+                    color = select(
+                        min(vec3<f32>(1.0), src_color / (vec3<f32>(1.0) - dst_color)),
+                        vec3<f32>(0.0),
+                        src_color == vec3<f32>(0.0),
+                    );
+
+                    break;
+                }
+                // ColorBurn
+                case 7u: {
+                    color = select(
+                        vec3<f32>(1.0) - min(vec3<f32>(1.0), (vec3<f32>(1.0) - src_color) / dst_color),
+                        vec3<f32>(1.0),
+                        src_color == vec3<f32>(1.0),
+                    );
+
+                    break;
+                }
+                // HardLight
+                case 8u: {
+                    color = 2.0 * select(
+                        dst_color + src_color - fma(dst_color, src_color, vec3<f32>(0.5)),
+                        dst_color * src_color,
+                        dst_color <= vec3<f32>(0.5),
+                    );
+
+                    break;
+                }
+                // SoftLight
+                case 9u: {
+                    let d = select(
+                        sqrt(src_color),
+                        src_color * fma(
+                            fma(vec3<f32>(16.0), src_color, vec3<f32>(-12.0)),
+                            src_color,
+                            vec3<f32>(4.0),
+                        ),
+                        src_color <= vec3<f32>(0.25),
+                    );
+
+                    color = 2.0 * select(
+                        fma(
+                            d - src_color,
+                            fma(vec3<f32>(2.0), dst_color, vec3<f32>(-1.0)),
+                            src_color
+                        ),
+                        src_color * (vec3<f32>(1.0) - src_color),
+                        dst_color <= vec3<f32>(0.5),
+                    );
+
+                    break;
+                }
+                // Difference
+                case 10u: {
+                    color = abs(dst_color - src_color);
+
+                    break;
+                }
+                // Exclusion
+                case 11u: {
+                    color = fma(
+                        dst_color,
+                        fma(vec3<f32>(-2.0), src_color, vec3<f32>(1.0)),
                         src_color,
-                        vec3<f32>(4.0),
-                    ),
-                    src_color <= vec3<f32>(0.25),
-                );
+                    );
 
-                color = 2.0 * select(
-                    fma(
-                        d - src_color,
-                        fma(vec3<f32>(2.0), dst_color, vec3<f32>(-1.0)),
-                        src_color
-                    ),
-                    src_color * (vec3<f32>(1.0) - src_color),
-                    dst_color <= vec3<f32>(0.5),
-                );
-            // Difference
-            } elseif (blend_mode == 10u) {
-                color = abs(dst_color - src_color);
-            // Exclusion
-            } elseif (blend_mode == 11u) {
-                color = fma(
-                    dst_color,
-                    fma(vec3<f32>(-2.0), src_color, vec3<f32>(1.0)),
-                    src_color,
-                );
+                    break;
+                
+                }
+                default: { break; }
             }
 
             return fma(dst, vec4<f32>(inv_alpha), vec4<f32>(color, alpha));

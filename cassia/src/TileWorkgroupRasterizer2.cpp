@@ -27,7 +27,7 @@ namespace cassia {
 
     TileWorkgroupRasterizer2::TileWorkgroupRasterizer2(wgpu::Device device)
         : mDevice(std::move(device)) {
-        std::string code = std::string(kPSegmentWGSL) +  R"(
+        std::string code = std::string(kPSegmentWGSL) + kStylingWGSL + R"(
             [[block]] struct Config {
                 width: u32;
                 height: u32;
@@ -47,20 +47,12 @@ namespace cassia {
                 end: u32; // Exclusive
             };
 
-            // TODO dedup
-            struct Styling {
-                fill_rule: u32;
-                fill: array<f32, 4>;
-                blend_mode: u32;
-            };
             [[block]] struct Stylings {
                 data: array<Styling>;
             };
 
             [[group(0), binding(2)]] var<storage> stylings : Stylings;
             [[group(0), binding(3)]] var out : texture_storage_2d<rgba16float, write>;
-
-            let PIXEL_SIZE = 16;
 
             // We need constexprs....
             let TILE_WIDTH = 8;

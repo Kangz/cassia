@@ -23,9 +23,10 @@
 #endif  // defined(CASSIA_SHARED_LIBRARY)
 
 typedef struct CassiaStyling {
-    uint32_t fill_rule;
     float fill[4];
+    uint32_t fill_rule;
     uint32_t blend_mode;
+    uint32_t _padding[2];
 } CassiaStyling;
 
 extern "C" {
