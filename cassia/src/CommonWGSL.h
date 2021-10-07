@@ -4,6 +4,7 @@
 namespace cassia {
 
     extern const char kPSegmentWGSL[];
+    extern const char kStylingWGSL[];
 
 } // namespace cassia
 
