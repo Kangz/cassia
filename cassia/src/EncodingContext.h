@@ -3,30 +3,37 @@
 
 #include "webgpu/webgpu_cpp.h"
 
+#include <string>
+#include <vector>
+
 namespace cassia {
 
     class EncodingContext {
       public:
-        EncodingContext(wgpu::Device device);
+        EncodingContext(wgpu::Device device, bool hasTimestamps);
 
         const wgpu::CommandEncoder& GetEncoder() const;
-        wgpu::CommandBuffer Finish();
+        void SubmitOn(const wgpu::Queue& queue);
 
       private:
         friend class ScopedComputePass;
         friend class ScopedRenderPass;
 
-        void OnStartComputePass(const char* name);
-        void OnEndComputePass();
-
-        void OnStartRenderPass(const char* name);
-        void OnEndRenderPass();
+        void OnStartPass(const char* name);
+        void OnEndPass();
 
         wgpu::CommandEncoder mEncoder;
         wgpu::Device mDevice;
 
-        // TODO collect scopes with CPU timestamps
-        // TODO add GPU timestamps
+        struct Scope {
+            std::string name;
+            uint64_t startCpuTimeNs;
+            uint64_t endCpuTimeNs;
+        };
+        std::vector<Scope> mScopes;
+
+        bool mGatherTimestamps;
+        wgpu::QuerySet mGpuTimestamps;
     };
 
     class ScopedComputePass {

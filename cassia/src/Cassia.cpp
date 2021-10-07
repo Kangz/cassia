@@ -32,7 +32,24 @@ namespace cassia {
             wgpu::AdapterProperties adapterProperties;
             adapter.GetProperties(&adapterProperties);
             std::cout << "Using adapter " << adapterProperties.name << std::endl;
-            mDevice = wgpu::Device::Acquire(adapter.CreateDevice());
+
+            // Check for timestamp support.
+            mTimestampsSupported = false;
+            for (const char* extension : adapter.GetSupportedFeatures()) {
+                if (extension == std::string("timestamp_query")) { // ewwww
+                    std::cout << "Timestamps are supported!" << std::endl;
+                    mTimestampsSupported = true;
+                    break;
+                }
+            }
+
+            // Create the device
+            dawn_native::DeviceDescriptor deviceDesc;
+            if (mTimestampsSupported) {
+                deviceDesc.requiredFeatures.push_back("timestamp_query");
+                deviceDesc.forceDisabledToggles.push_back("disallow_unsafe_apis");
+            }
+            mDevice = wgpu::Device::Acquire(adapter.CreateDevice(&deviceDesc));
             mDevice.SetUncapturedErrorCallback([](WGPUErrorType, const char* message, void*) {
                 std::cerr << "Dawn error: " << message;
             }, nullptr);
@@ -124,7 +141,7 @@ namespace cassia {
                     wgpu::BufferUsage::Storage);
 
             // Run all the steps of the algorithm.
-            EncodingContext context(mDevice);
+            EncodingContext context(mDevice, mTimestampsSupported);
 
             NaiveComputeRasterizer::Config config = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
             wgpu::Texture picture = mRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, config);
@@ -149,9 +166,7 @@ namespace cassia {
             }
 
             // Submit all the commands!
-            wgpu::CommandBuffer commands = context.Finish();
-            mQueue.Submit(1, &commands);
-
+            context.SubmitOn(mQueue);
             mSwapchain.Present();
         }
 
@@ -181,6 +196,7 @@ namespace cassia {
         GLFWwindow* mWindow = nullptr;
 
         uint32_t mWidth, mHeight;
+        bool mTimestampsSupported;
     };
 
     static std::unique_ptr<Cassia> sCassia;
