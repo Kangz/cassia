@@ -19,6 +19,8 @@ add_library(cassia SHARED
     src/Cassia.h
     src/CommonWGSL.cpp
     src/CommonWGSL.h
+    src/EncodingContext.cpp
+    src/EncodingContext.h
     src/NaiveComputeRasterizer.cpp
     src/NaiveComputeRasterizer.h
 )

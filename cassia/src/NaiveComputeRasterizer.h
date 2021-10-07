@@ -5,6 +5,8 @@
 
 namespace cassia {
 
+    class EncodingContext;
+
     class NaiveComputeRasterizer {
       public:
         NaiveComputeRasterizer(wgpu::Device device);
@@ -14,7 +16,7 @@ namespace cassia {
             uint32_t height;
             uint32_t segmentCount;
         };
-        wgpu::Texture Rasterize(const wgpu::ComputePassEncoder& pass,
+        wgpu::Texture Rasterize(EncodingContext* context,
             wgpu::Buffer sortedPsegments, wgpu::Buffer stylingsBuffer,
             const Config& config);
 

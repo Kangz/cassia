@@ -1,5 +1,6 @@
 #include "Cassia.h"
 
+#include "EncodingContext.h"
 #include "NaiveComputeRasterizer.h"
 
 #include <webgpu/webgpu_cpp.h>
@@ -106,7 +107,7 @@ namespace cassia {
         void Render(
             const uint64_t* psegmentsIn,
             size_t psegmentCount,
-            const Styling* stylings,
+            const CassiaStyling* stylings,
             size_t stylingCount
         ) {
             glfwPollEvents();
@@ -119,41 +120,36 @@ namespace cassia {
                     mDevice, psegments.data(), psegments.size() * sizeof(uint64_t),
                     wgpu::BufferUsage::Storage);
             wgpu::Buffer stylingsBuffer = utils::CreateBufferFromData(
-                    mDevice, stylings, stylingCount * sizeof(Styling),
+                    mDevice, stylings, stylingCount * sizeof(CassiaStyling),
                     wgpu::BufferUsage::Storage);
 
             // Run all the steps of the algorithm.
-            wgpu::CommandEncoder encoder = mDevice.CreateCommandEncoder();
-            wgpu::ComputePassEncoder pass = encoder.BeginComputePass();
+            EncodingContext context(mDevice);
 
             NaiveComputeRasterizer::Config config = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-            wgpu::Texture picture = mRasterizer->Rasterize(pass, sortedPsegments, stylingsBuffer, config);
-
-            pass.EndPass();
+            wgpu::Texture picture = mRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, config);
 
             // Do the blit into the swapchain.
-            encoder.PushDebugGroup("blit pass");
             {
                 wgpu::BindGroup blitBindGroup = utils::MakeBindGroup(
                         mDevice, mBlitPipeline.GetBindGroupLayout(0), {
                     {0, mDevice.CreateSampler()},
                     {1, picture.CreateView()},
                 });
+
                 utils::ComboRenderPassDescriptor rpDesc({{mSwapchain.GetCurrentTextureView()}});
                 rpDesc.cColorAttachments[0].loadOp = wgpu::LoadOp::Clear;
                 rpDesc.cColorAttachments[0].storeOp = wgpu::StoreOp::Store;
                 rpDesc.cColorAttachments[0].clearColor = {0.0, 0.0, 0.0, 0.0};
+                ScopedRenderPass pass(&context, rpDesc, "Cassia::BlitToSwapChain");
 
-                wgpu::RenderPassEncoder blitPass = encoder.BeginRenderPass(&rpDesc);
-                blitPass.SetPipeline(mBlitPipeline);
-                blitPass.SetBindGroup(0, blitBindGroup);
-                blitPass.Draw(4);
-                blitPass.EndPass();
+                pass->SetPipeline(mBlitPipeline);
+                pass->SetBindGroup(0, blitBindGroup);
+                pass->Draw(4);
             }
-            encoder.PopDebugGroup();
 
             // Submit all the commands!
-            wgpu::CommandBuffer commands = encoder.Finish();
+            wgpu::CommandBuffer commands = context.Finish();
             mQueue.Submit(1, &commands);
 
             mSwapchain.Present();
@@ -198,7 +194,7 @@ void cassia_init(uint32_t width, uint32_t height) {
 void cassia_render(
     const uint64_t* psegments,
     size_t psegmentCount,
-    const Styling* stylings,
+    const CassiaStyling* stylings,
     size_t stylingCount
 ) {
     cassia::sCassia->Render(psegments, psegmentCount, stylings, stylingCount);

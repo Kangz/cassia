@@ -1,6 +1,7 @@
 #include "NaiveComputeRasterizer.h"
 
 #include "CommonWGSL.h"
+#include "EncodingContext.h"
 
 #include "utils/WGPUHelpers.h"
 
@@ -27,8 +28,6 @@ namespace cassia {
                 fill: array<f32, 4>;
                 blend_mode: u32;
             };
-
-            // TODO define helpers to extract data from the PSegment
 
             [[block]] struct PSegments {
                 data: array<PSegment>;
@@ -70,13 +69,13 @@ namespace cassia {
                     }
                 }
 
-                var layer_id = psegment_layer_id(segments.data[0]);
+                var layer = psegment_layer(segments.data[0]);
 
-                var fill = stylings.data[0].fill;
+                var fill = stylings.data[layer].fill;
                 var color = vec3<f32>(fill[0], fill[1], fill[2]);
-                var greyscale = vec4<f32>(color * (cover + area), fill[3]);
+                var accumulator = vec4<f32>(color * (cover + area), fill[3]);
 
-                textureStore(out, vec2<i32>(GlobalId.xy), greyscale);
+                textureStore(out, vec2<i32>(GlobalId.xy), accumulator);
             }
         )";
         wgpu::ShaderModule module = utils::CreateShaderModule(mDevice, code.c_str());
@@ -88,7 +87,7 @@ namespace cassia {
         mPipeline = mDevice.CreateComputePipeline(&pDesc);
     }
 
-    wgpu::Texture NaiveComputeRasterizer::Rasterize(const wgpu::ComputePassEncoder& pass,
+    wgpu::Texture NaiveComputeRasterizer::Rasterize(EncodingContext* context,
             wgpu::Buffer sortedPsegments, wgpu::Buffer stylingsBuffer, const Config& config) {
         wgpu::Buffer uniforms = utils::CreateBufferFromData(
                 mDevice, &config, sizeof(Config), wgpu::BufferUsage::Uniform);
@@ -107,11 +106,12 @@ namespace cassia {
                 {3, outTexture.CreateView()}
                 });
 
-        pass.PushDebugGroup("naive raster");
-        pass.SetBindGroup(0, bg);
-        pass.SetPipeline(mPipeline);
-        pass.Dispatch((config.width + 7) / 8, (config.height + 7) / 8);
-        pass.PopDebugGroup();
+        {
+            ScopedComputePass pass(context, "NaiveComputeRasterizer");
+            pass->SetBindGroup(0, bg);
+            pass->SetPipeline(mPipeline);
+            pass->Dispatch((config.width + 7) / 8, (config.height + 7) / 8);
+        }
 
         return outTexture;
     }

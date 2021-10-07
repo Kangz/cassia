@@ -48,11 +48,6 @@ namespace cassia {
         fn psegment_tile_y(s : PSegment) -> i32{
             return (i32(s.hi) << 1u) >> (17u + TILE_HEIGHT_SHIFT);
         }
-        fn psegment_layer_id(s : PSegment) -> u32 {
-            let mask = (1u << 16u) - 1u;
-            return (s.hi << (16u - TILE_WIDTH_SHIFT - TILE_HEIGHT_SHIFT)) &
-                mask | (s.lo >> (16u + TILE_WIDTH_SHIFT + TILE_HEIGHT_SHIFT));
-        }
         fn psegment_local_x(s : PSegment) -> u32 {
             var mask = (1u << TILE_WIDTH_SHIFT) - 1u;
             return (s.lo >> 16u) & mask;
