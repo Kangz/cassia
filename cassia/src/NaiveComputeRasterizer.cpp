@@ -48,10 +48,26 @@ namespace cassia {
                 }
                 var pos = vec2<i32>(GlobalId.xy);
 
-                var cover = 0.0;
-                var area = 0.0;
+                var accumulator = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+
+                var old_layer_id = psegment_layer(segments.data[0u]);
+                var cover = 0;
+                var area = 0;
                 for (var i = 0u; i < config.count; i = i + 1u) {
                     var segment = segments.data[i];
+                    var layer_id = psegment_layer(segments.data[0]);
+
+                    if (old_layer_id != layer_id) {
+                        var styling = stylings.data[old_layer_id];
+
+                        var coverage = from_area(area + cover * PIXEL_SIZE, styling.fill_rule);
+                        accumulator = blend(accumulator, vec4<f32>(styling.fill.xyz, styling.fill.w * coverage));
+
+                        old_layer_id = layer_id;
+                        cover = 0;
+                        area = 0;
+                    }
+
                     if (psegment_is_none(segment)) {
                         continue;
                     }
@@ -63,17 +79,16 @@ namespace cassia {
 
                     var x = (psegment_tile_x(segment) << TILE_WIDTH_SHIFT) + i32(psegment_local_x(segment));
                     if (x < pos.x) {
-                        cover = cover + f32(psegment_cover(segment)) / COVER_DIVISOR;
+                        cover = cover + psegment_cover(segment);
                     } elseif (x == pos.x) {
-                        area = area + f32(psegment_area(segment)) / AREA_DIVISOR;
+                        area = area + psegment_area(segment);
                     }
                 }
 
-                var layer = psegment_layer(segments.data[0]);
+                var styling = stylings.data[old_layer_id];
 
-                var fill = stylings.data[layer].fill;
-                var color = vec3<f32>(fill[0], fill[1], fill[2]);
-                var accumulator = vec4<f32>(color * (cover + area), fill[3]);
+                var coverage = from_area(area + cover * PIXEL_SIZE, styling.fill_rule);
+                accumulator = blend(accumulator, vec4<f32>(styling.fill.xyz, styling.fill.w * coverage));
 
                 textureStore(out, vec2<i32>(GlobalId.xy), accumulator);
             }
