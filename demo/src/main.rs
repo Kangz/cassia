@@ -108,10 +108,15 @@ struct Cassia {
     cassia_shutdown: unsafe extern "C" fn(),
 }
 
+#[cfg(target_os="macos")]
+const CASSIA_LIB_NAME : &str = "../out/libcassia.dylib";
+#[cfg(target_os="linux")]
+const CASSIA_LIB_NAME : &str = "../out/libcassia.so";
+
 fn render_with_cassia(width: usize, height: usize, composition: &mut Composition, stylings: &[Styling]) {
     let pixel_segments = composition.pixel_segments();
 
-    let mut cont: Container<Cassia> = unsafe { Container::load("../out/libcassia.so") }.unwrap();
+    let cont: Container<Cassia> = unsafe { Container::load(CASSIA_LIB_NAME) }.unwrap();
 
     unsafe {
         cont.cassia_init(width as u32, height as u32);

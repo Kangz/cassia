@@ -36,7 +36,7 @@ namespace cassia {
 
             fn tile_index(tileX: i32, tileY: i32) -> u32 {
                 // TODO handle tileX/Y being negative!
-                return u32(tileX) + u32(config.tilesPerRow) * u32(tileY);
+                return u32(tileX + i32(config.tilesPerRow) * tileY);
             }
 
             // Large workgroup size to not run into the max dispatch limitation.

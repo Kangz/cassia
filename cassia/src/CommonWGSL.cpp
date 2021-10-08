@@ -5,13 +5,13 @@ namespace cassia {
     const char kPSegmentWGSL[] = R"(
         // This is the definition of a PSegment in mold
         //
-        // const TILE_WIDTH: usize = 8;
-        // const TILE_WIDTH_SHIFT: usize = 3
-        // const TILE_WIDTH_MASK: usize = 7;
+        // pub const TILE_WIDTH: usize = 8;
+        // const TILE_WIDTH_SHIFT: usize = TILE_WIDTH.trailing_zeros() as usize;
+        // const TILE_WIDTH_MASK: usize = TILE_WIDTH - 1;
         //
-        // pub const TILE_HEIGHT: usize = 64;
-        // const TILE_HEIGHT_SHIFT: usize = 6;
-        // const TILE_HEIGHT_MASK: usize = 63;
+        // pub const TILE_HEIGHT: usize = 8;
+        // const TILE_HEIGHT_SHIFT: usize = TILE_HEIGHT.trailing_zeros() as usize;
+        // const TILE_HEIGHT_MASK: usize = TILE_HEIGHT - 1;/
         //
         // pub struct CompactSegment(u64) {
         //     is_none: u8[1],
@@ -30,7 +30,7 @@ namespace cassia {
         };
 
         let TILE_WIDTH_SHIFT = 3u;
-        let TILE_HEIGHT_SHIFT = 6u;
+        let TILE_HEIGHT_SHIFT = 3u;
         let COVER_DIVISOR = 16.0;
         let AREA_DIVISOR = 256.0;
 

@@ -28,6 +28,6 @@ pub const TILE_WIDTH: usize = 8;
 const TILE_WIDTH_SHIFT: usize = TILE_WIDTH.trailing_zeros() as usize;
 const TILE_WIDTH_MASK: usize = TILE_WIDTH - 1;
 
-pub const TILE_HEIGHT: usize = 64;
+pub const TILE_HEIGHT: usize = 8;
 const TILE_HEIGHT_SHIFT: usize = TILE_HEIGHT.trailing_zeros() as usize;
 const TILE_HEIGHT_MASK: usize = TILE_HEIGHT - 1;
