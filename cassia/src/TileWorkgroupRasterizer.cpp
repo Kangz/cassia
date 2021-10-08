@@ -155,13 +155,36 @@ namespace cassia {
                 }
             }
 
+            // Ewwwww can we do better than this? Maybe a prepass that puts in cover carry storage?
+            // Or maybe an alternative representation for psegments based on tileY sign:
+            //      "sort psegment in (tileY, tileX, layerId) if tileY >= 0 but (tileY, layerId, localY) if tileY < 0"
+            fn countTileCoverOnOneInvocation(tileId: vec2<i32>, localId: vec2<u32>) {
+                var tileRange = tileRanges.data[tile_index(tileId.x, tileId.y)];
+
+                for (var i = tileRange.start; i < tileRange.end; i = i + 1u) {
+                    var segment = segments.data[i];
+                    var segmentLocalY = psegment_local_y(segment);
+                    coverCarry[segmentLocalY] = coverCarry[segmentLocalY] + psegment_cover(segment);
+                }
+            }
+
             // TODO doesn't handle stuff outside the screen.
             [[stage(compute), workgroup_size(8, 8)]]
             fn rasterizeTileRow([[builtin(workgroup_id)]] WorkgroupId : vec3<u32>,
                              [[builtin(local_invocation_id)]] LocalId : vec3<u32>) {
+                if (all(LocalId == vec3<u32>(0u))) {
+                    var tileId = vec2<i32>(- config.tilesPerRow / 2, i32(WorkgroupId.x));
+                    for (; tileId.x < 0; tileId.x = tileId.x  + 1) {
+                        countTileCoverOnOneInvocation(tileId, LocalId.xy);
+                    }
+                }
+
+                workgroupBarrier();
+
                 var tileId = vec2<i32>(0, i32(WorkgroupId.x));
                 for (; tileId.x < config.tilesPerRow; tileId.x = tileId.x + 1) {
                     rasterizeTile(tileId, LocalId.xy);
+                    workgroupBarrier();
                 }
             }
         )";
@@ -190,13 +213,12 @@ namespace cassia {
             config.width,
             config.height,
             config.segmentCount,
-            static_cast<int32_t>((config.width + TILE_WIDTH_SHIFT - 1) / TILE_WIDTH_SHIFT),
+            tilesPerRow,
             tileRangeCount
         };
         wgpu::Buffer uniforms = utils::CreateBufferFromData(
                 mDevice, &uniformData, sizeof(uniformData), wgpu::BufferUsage::Uniform);
 
-        // TODO we only need (W + 1) * H tiles?
         wgpu::BufferDescriptor tileRangeDesc;
         tileRangeDesc.size = tileRangeCount *  sizeof(TileRange);
         tileRangeDesc.usage = wgpu::BufferUsage::Storage;
