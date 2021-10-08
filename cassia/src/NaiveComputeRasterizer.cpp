@@ -79,7 +79,7 @@ namespace cassia {
         wgpu::ShaderModule module = utils::CreateShaderModule(mDevice, code.c_str());
 
         wgpu::ComputePipelineDescriptor pDesc;
-        pDesc.label = "naive rasterizer pipeline";
+        pDesc.label = "naive rasterizer";
         pDesc.compute.module = module;
         pDesc.compute.entryPoint = "main";
         mPipeline = mDevice.CreateComputePipeline(&pDesc);
@@ -97,15 +97,24 @@ namespace cassia {
         texDesc.format = wgpu::TextureFormat::RGBA16Float;
         wgpu::Texture outTexture = mDevice.CreateTexture(&texDesc);
 
-        wgpu::BindGroup bg = utils::MakeBindGroup(mDevice, mPipeline.GetBindGroupLayout(0), {
+        {
+            wgpu::BindGroup bg = utils::MakeBindGroup(mDevice, mPipeline.GetBindGroupLayout(0), {
                 {0, uniforms},
                 {1, sortedPsegments},
                 {2, stylingsBuffer},
                 {3, outTexture.CreateView()}
-                });
+            });
 
-        {
+            {
+                ScopedComputePass pass(context, "NaiveComputeRasterizer::FakePassToFactorOutLazyClearCost");
+
+                pass->SetBindGroup(0, bg);
+                pass->SetPipeline(mPipeline);
+                pass->Dispatch(0);
+            }
+
             ScopedComputePass pass(context, "NaiveComputeRasterizer");
+
             pass->SetBindGroup(0, bg);
             pass->SetPipeline(mPipeline);
             pass->Dispatch((config.width + 7) / 8, (config.height + 7) / 8);

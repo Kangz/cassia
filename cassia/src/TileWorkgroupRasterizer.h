@@ -22,6 +22,8 @@ namespace cassia {
 
       private:
         wgpu::Device mDevice;
+        wgpu::ComputePipeline mTileRangePipeline;
+        wgpu::ComputePipeline mRasterPipeline;
     };
 
 } // namespace cassia

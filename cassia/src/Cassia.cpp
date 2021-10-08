@@ -145,8 +145,11 @@ namespace cassia {
             // Run all the steps of the algorithm.
             EncodingContext context(mDevice, mTimestampsSupported);
 
-            NaiveComputeRasterizer::Config config = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-            wgpu::Texture picture = mNaiveRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, config);
+            NaiveComputeRasterizer::Config naiveConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
+            wgpu::Texture unusedPicture = mNaiveRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, naiveConfig);
+            TileWorkgroupRasterizer::Config tileConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
+
+            wgpu::Texture picture = mTileRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, tileConfig);
 
             // Do the blit into the swapchain.
             {

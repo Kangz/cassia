@@ -29,6 +29,7 @@ namespace cassia {
             hi: u32;
         };
 
+        // Also keep the constants in CommonWGSL.h in sync.
         let TILE_WIDTH_SHIFT = 3u;
         let TILE_HEIGHT_SHIFT = 3u;
         let COVER_DIVISOR = 16.0;
