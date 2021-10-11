@@ -66,14 +66,15 @@ namespace cassia {
         }
         fn psegment_tile_x_for_negative_tile_x(s : PSegment) -> i32 {
             var kTotalBits = 15u - TILE_WIDTH_SHIFT; // without the sign bit
+            var kTotalWithSignBits = kTotalBits + 1u;
             var kBitsHigh = TILE_HEIGHT_SHIFT - 1u;
             var kBitsLow = kTotalBits - kBitsHigh;
 
             var kHighMask = (1u << (kBitsHigh)) - 1u;
-            return i32((1u << 31u) |
-                // ((s.hi & kHighMask) << (kBitsLow)) |
+            return (i32((1u << kTotalBits) |
+                ((s.hi & kHighMask) << (kBitsLow)) |
                 ((s.lo >> (32u - kBitsLow)))
-            );
+            ) << (32u - kTotalWithSignBits)) >> (32u - kTotalWithSignBits);
         }
         fn psegment_tile_x(s : PSegment) -> i32 {
             if (psegment_tile_x_negative(s)) {

@@ -149,8 +149,8 @@ namespace cassia {
             constexpr uint64_t kTileXRestWidth = 16 - TILE_WIDTH_SHIFT - 1;
             constexpr uint64_t kTileXRestStart = kLayerStart + kLayerWidth;
 
-            constexpr uint64_t kTileXRestMask = BitfieldMask(kTileXRestWidth, kTileXRestStart);
-            constexpr uint64_t kLayerMask = BitfieldMask(kLayerWidth, kLayerStart);
+            constexpr uint64_t kTileXRestMask = BitfieldMask(kTileXRestStart, kTileXRestWidth);
+            constexpr uint64_t kLayerMask = BitfieldMask(kLayerStart, kLayerWidth);
             constexpr uint64_t kOtherMask = ~(kTileXRestMask | kLayerMask);
             for (auto& s : psegments) {
                 if (s & (uint64_t(1) << (kTileXRestStart + kTileXRestWidth))) {
