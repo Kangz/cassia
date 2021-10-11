@@ -34,6 +34,7 @@ namespace cassia {
         let TILE_HEIGHT_SHIFT = 3u;
         let COVER_DIVISOR = 16.0;
         let AREA_DIVISOR = 256.0;
+        let TILE_X_OFFSET = 256;
 
         fn psegment_is_none(s : PSegment) -> bool {
             return bool(s.hi & (1u << 31u));
@@ -44,7 +45,7 @@ namespace cassia {
                    (s.lo >> (16u + TILE_WIDTH_SHIFT + TILE_HEIGHT_SHIFT));
         }
         fn psegment_tile_x(s : PSegment) -> i32 {
-            return (i32(s.hi) << (16u - TILE_HEIGHT_SHIFT)) >> (16u + TILE_WIDTH_SHIFT);
+            return ((i32(s.hi) << (16u - TILE_HEIGHT_SHIFT)) >> (16u + TILE_WIDTH_SHIFT)) - TILE_X_OFFSET;
         }
         fn psegment_tile_y(s : PSegment) -> i32{
             return (i32(s.hi) << 1u) >> (17u + TILE_HEIGHT_SHIFT);

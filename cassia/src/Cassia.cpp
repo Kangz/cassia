@@ -1,8 +1,10 @@
 #include "Cassia.h"
 
 #include "EncodingContext.h"
+#include "CommonWGSL.h"
 #include "NaiveComputeRasterizer.h"
 #include "TileWorkgroupRasterizer.h"
+#include "TileWorkgroupRasterizer2.h"
 
 #include <webgpu/webgpu_cpp.h>
 #include <dawn/dawn_proc.h>
@@ -121,6 +123,7 @@ namespace cassia {
             // Create sub components
             mNaiveRasterizer = std::make_unique<NaiveComputeRasterizer>(mDevice);
             mTileRasterizer = std::make_unique<TileWorkgroupRasterizer>(mDevice);
+            mTileRasterizer2 = std::make_unique<TileWorkgroupRasterizer2>(mDevice);
         }
 
         void Render(
@@ -133,6 +136,19 @@ namespace cassia {
 
             // Sort using the CPU for now.
             std::vector<uint64_t> psegments(psegmentsIn, psegmentsIn + psegmentCount);
+
+            
+            for (uint32_t i = 0; i < psegments.size(); i++) {
+                PSegment* ps = reinterpret_cast<PSegment *>(&psegments[i]);
+                
+                // All negative tile Xs can just be the same
+                if (ps->tile_x < 0)
+                    ps->tile_x = -1;
+
+                // Offset tile X to ensure negative tile Xs are sorted to the front.
+                ps->tile_x += TILE_X_OFFSET;
+            }
+
             std::sort(psegments.begin(), psegments.end());
 
             wgpu::Buffer sortedPsegments = utils::CreateBufferFromData(
@@ -147,9 +163,12 @@ namespace cassia {
 
             NaiveComputeRasterizer::Config naiveConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
             wgpu::Texture unusedPicture = mNaiveRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, naiveConfig);
+            
             TileWorkgroupRasterizer::Config tileConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-
-            wgpu::Texture picture = mTileRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, tileConfig);
+            wgpu::Texture unusedPicture2 = mTileRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, tileConfig);
+            
+            TileWorkgroupRasterizer2::Config tileConfig2 = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
+            wgpu::Texture picture = mTileRasterizer2->Rasterize(&context, sortedPsegments, stylingsBuffer, tileConfig2);
 
             // Do the blit into the swapchain.
             {
@@ -193,6 +212,7 @@ namespace cassia {
       private:
         std::unique_ptr<NaiveComputeRasterizer> mNaiveRasterizer;
         std::unique_ptr<TileWorkgroupRasterizer> mTileRasterizer;
+        std::unique_ptr<TileWorkgroupRasterizer2> mTileRasterizer2;
 
         wgpu::RenderPipeline mBlitPipeline;
         wgpu::Queue mQueue;
