@@ -3,6 +3,7 @@
 #include "EncodingContext.h"
 #include "NaiveComputeRasterizer.h"
 #include "TileWorkgroupRasterizer.h"
+#include "CommonWGSL.h"
 
 #include <webgpu/webgpu_cpp.h>
 #include <dawn/dawn_proc.h>
@@ -13,10 +14,15 @@
 #include "utils/ComboRenderPipelineDescriptor.h"
 
 #include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <memory>
 
 namespace cassia {
+
+    constexpr uint64_t BitfieldMask(uint64_t firstBit, uint64_t bitCount) {
+        return ((uint64_t(1) << bitCount) - 1) << firstBit;
+    }
 
     class Cassia {
       public:
@@ -52,7 +58,10 @@ namespace cassia {
             }
             mDevice = wgpu::Device::Acquire(adapter.CreateDevice(&deviceDesc));
             mDevice.SetUncapturedErrorCallback([](WGPUErrorType, const char* message, void*) {
-                std::cerr << "Dawn error: " << message;
+                std::cerr << "Dawn error: " << message << std::endl;
+            }, nullptr);
+            mDevice.SetLoggingCallback([](WGPULoggingType type, char const* message, void*) {
+                std::cout << "Dawn logging: " << message << std::endl;
             }, nullptr);
             mQueue = mDevice.GetQueue();
 
@@ -133,6 +142,25 @@ namespace cassia {
 
             // Sort using the CPU for now.
             std::vector<uint64_t> psegments(psegmentsIn, psegmentsIn + psegmentCount);
+
+            // Change the format of psegments when tileX < 0
+            constexpr uint64_t kLayerWidth = 16;
+            constexpr uint64_t kLayerStart = 6 + 10 + TILE_WIDTH_SHIFT + TILE_HEIGHT_SHIFT;
+            constexpr uint64_t kTileXRestWidth = 16 - TILE_WIDTH_SHIFT - 1;
+            constexpr uint64_t kTileXRestStart = kLayerStart + kLayerWidth;
+
+            constexpr uint64_t kTileXRestMask = BitfieldMask(kTileXRestWidth, kTileXRestStart);
+            constexpr uint64_t kLayerMask = BitfieldMask(kLayerWidth, kLayerStart);
+            constexpr uint64_t kOtherMask = ~(kTileXRestMask | kLayerMask);
+            for (auto& s : psegments) {
+                if (s & (uint64_t(1) << (kTileXRestStart + kTileXRestWidth))) {
+                    uint64_t tileXRest = s & kTileXRestMask;
+                    uint64_t layer = s & kLayerMask;
+                    uint64_t other = s & kOtherMask;
+                    s = other | (layer << kLayerWidth) | (tileXRest >> kTileXRestWidth);
+                }
+            }
+
             std::sort(psegments.begin(), psegments.end());
 
             wgpu::Buffer sortedPsegments = utils::CreateBufferFromData(
@@ -146,10 +174,9 @@ namespace cassia {
             EncodingContext context(mDevice, mTimestampsSupported);
 
             NaiveComputeRasterizer::Config naiveConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-            wgpu::Texture unusedPicture = mNaiveRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, naiveConfig);
-            TileWorkgroupRasterizer::Config tileConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-
-            wgpu::Texture picture = mTileRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, tileConfig);
+            wgpu::Texture picture = mNaiveRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, naiveConfig);
+            //TileWorkgroupRasterizer::Config tileConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
+            //wgpu::Texture picture = mTileRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, tileConfig);
 
             // Do the blit into the swapchain.
             {

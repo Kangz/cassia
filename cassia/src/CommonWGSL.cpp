@@ -3,26 +3,27 @@
 namespace cassia {
 
     const char kPSegmentWGSL[] = R"(
-        // This is the definition of a PSegment in mold
+        // This is the definition of a PSegment, a definition of the form name: number of bits:
         //
-        // pub const TILE_WIDTH: usize = 8;
-        // const TILE_WIDTH_SHIFT: usize = TILE_WIDTH.trailing_zeros() as usize;
-        // const TILE_WIDTH_MASK: usize = TILE_WIDTH - 1;
+        //   TILE_WIDTH_SHIFT = 3
+        //   TILE_HEIGHT_SHIFT = 3
         //
-        // pub const TILE_HEIGHT: usize = 8;
-        // const TILE_HEIGHT_SHIFT: usize = TILE_HEIGHT.trailing_zeros() as usize;
-        // const TILE_HEIGHT_MASK: usize = TILE_HEIGHT - 1;/
+        //   is_none: 1bit
+        //   tile_y: 15 - TILE_HEIGHT_SHIFT
+        //   tile_x_sign: 1
         //
-        // pub struct CompactSegment(u64) {
-        //     is_none: u8[1],
-        //     tile_y: i16[15 - TILE_HEIGHT_SHIFT],
-        //     tile_x: i16[16 - TILE_WIDTH_SHIFT],
-        //     layer: u16[16],
-        //     local_y: u8[TILE_HEIGHT_SHIFT],
-        //     local_x: u8[TILE_WIDTH_SHIFT],
-        //     area: i16[10],
-        //     cover: i8[6],
-        // }
+        //   if (tile_x_sign == 0) {
+        //     tile_x_rest: 16 - TILE_WIDTH_SHIFT - 1 (for the sign bit)
+        //     layer: 16
+        //   } else {
+        //     layer: 16
+        //     tile_x_rest: 16 - TILE_WIDTH_SHIFT - 1 (for the sign bit)
+        //   }
+        //
+        //   local_y: TILE_HEIGHT_SHIFT
+        //   local_x: TILE_WIDTH_SHIFT
+        //   area: 10
+        //   cover: 6
 
         struct PSegment {
             lo: u32;
@@ -38,14 +39,52 @@ namespace cassia {
         fn psegment_is_none(s : PSegment) -> bool {
             return bool(s.hi & (1u << 31u));
         }
-        fn psegment_layer(s : PSegment) -> u32 {
+        fn psegment_tile_x_negative(s : PSegment) -> bool {
+            return bool(s.hi & (1u << (31u - 15u + TILE_HEIGHT_SHIFT - 1u)));
+        }
+
+        fn psegment_layer_for_positive_tile_x(s : PSegment) -> u32 {
             var mask = (1u << 16u) - 1u;
             return ((s.hi << (16u - TILE_WIDTH_SHIFT - TILE_HEIGHT_SHIFT)) & mask) |
                    (s.lo >> (16u + TILE_WIDTH_SHIFT + TILE_HEIGHT_SHIFT));
         }
-        fn psegment_tile_x(s : PSegment) -> i32 {
+        fn psegment_layer_for_negative_tile_x(s : PSegment) -> u32 {
+            return ((s.hi << (17u - TILE_HEIGHT_SHIFT)) >> 16u);
+        }
+        fn psegment_layer(s : PSegment) -> u32 {
+            if (psegment_tile_x_negative(s)) {
+                return psegment_layer_for_negative_tile_x(s);
+            } else {
+                return psegment_layer_for_positive_tile_x(s);
+            }
+            // TODO remove when Tint is fixed.
+            return 0u;
+        }
+
+        fn psegment_tile_x_for_positive_tile_x(s : PSegment) -> i32 {
             return (i32(s.hi) << (16u - TILE_HEIGHT_SHIFT)) >> (16u + TILE_WIDTH_SHIFT);
         }
+        fn psegment_tile_x_for_negative_tile_x(s : PSegment) -> i32 {
+            var kTotalBits = 15u - TILE_WIDTH_SHIFT; // without the sign bit
+            var kBitsHigh = TILE_HEIGHT_SHIFT - 1u;
+            var kBitsLow = kTotalBits - kBitsHigh;
+
+            var kHighMask = (1u << (kBitsHigh)) - 1u;
+            return i32((1u << 31u) |
+                // ((s.hi & kHighMask) << (kBitsLow)) |
+                ((s.lo >> (32u - kBitsLow)))
+            );
+        }
+        fn psegment_tile_x(s : PSegment) -> i32 {
+            if (psegment_tile_x_negative(s)) {
+                return psegment_tile_x_for_negative_tile_x(s);
+            } else {
+                return psegment_tile_x_for_positive_tile_x(s);
+            }
+            // TODO remove when Tint is fixed.
+            return 0;
+        }
+
         fn psegment_tile_y(s : PSegment) -> i32{
             return (i32(s.hi) << 1u) >> (17u + TILE_HEIGHT_SHIFT);
         }
