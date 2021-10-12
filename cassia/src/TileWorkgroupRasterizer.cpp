@@ -14,9 +14,9 @@ namespace cassia {
     struct ConfigUniforms {
         uint32_t width;
         uint32_t height;
+        uint32_t widthInTiles;
+        uint32_t heightInTiles;
         uint32_t segmentCount;
-        int32_t tilesPerRow;
-        uint32_t tileRowCount;
         uint32_t tileRangeCount;
     };
     static_assert(sizeof(ConfigUniforms) == 24, "");
@@ -32,9 +32,9 @@ namespace cassia {
             [[block]] struct Config {
                 width: u32;
                 height: u32;
+                widthInTiles: i32;
+                heightInTiles: i32;
                 segmentCount: u32;
-                tilesPerRow: i32;
-                tileRowCount: u32;
                 tileRangeCount: u32;
             };
             [[group(0), binding(0)]] var<uniform> config : Config;
@@ -54,7 +54,12 @@ namespace cassia {
             [[group(0), binding(2)]] var<storage, read_write> tileRanges : TileRanges;
 
             fn tile_index(tileX: i32, tileY: i32) -> u32 {
-                return u32(tileX - config.tilesPerRow / 2 + config.tilesPerRow * tileY);
+                return u32(tileX + tileY * (config.widthInTiles + 1));
+            }
+
+            fn tile_in_bounds(tileX: i32, tileY: i32) -> bool {
+                // Note that tileX is always >= -1
+                return tileX < config.widthInTiles && tileY >= 0 && tileY < config.heightInTiles;
             }
 
             // Large workgroup size to not run into the max dispatch limitation.
@@ -67,9 +72,9 @@ namespace cassia {
 
                         var tileX = psegment_tile_x(segment);
                         var tileY = psegment_tile_y(segment);
-                        var tileIndex = tile_index(tileX, tileY);
 
-                        if (tileIndex >= 0u && tileIndex < config.tileRangeCount) {
+                        if (tile_in_bounds(tileX, tileY)) {
+                            var tileIndex = tile_index(tileX, tileY);
                             tileRanges.data[tileIndex].end = GlobalId.x + 1u;
                         }
                     }
@@ -89,13 +94,13 @@ namespace cassia {
                 var tileY1 = psegment_tile_y(segment1);
 
                 if (tileX0 != tileX1 || tileY0 != tileY1) {
-                    var tileIndex0 = tile_index(tileX0, tileY0);
-                    if (tileIndex0 >= 0u && tileIndex0 < config.tileRangeCount) {
+                    if (tile_in_bounds(tileX0, tileY0)) {
+                        var tileIndex0 = tile_index(tileX0, tileY0);
                         tileRanges.data[tileIndex0].end = GlobalId.x + 1u;
                     }
 
-                    var tileIndex1 = tile_index(tileX1, tileY1);
-                    if (tileIndex1 >= 0u && tileIndex1 < config.tileRangeCount) {
+                    if (tile_in_bounds(tileX1, tileY1)) {
+                        var tileIndex1 = tile_index(tileX1, tileY1);
                         tileRanges.data[tileIndex1].start = GlobalId.x + 1u;
                     }
                 }
@@ -173,7 +178,7 @@ namespace cassia {
                 workgroupBarrier();
 
                 var tileId = vec2<i32>(0, i32(WorkgroupId.x));
-                for (; tileId.x < i32(config.tileRowCount); tileId.x = tileId.x + 1) {
+                for (; tileId.x < i32(config.widthInTiles); tileId.x = tileId.x + 1) {
                     rasterizeTile(tileId, LocalId.xy);
                     workgroupBarrier();
                 }
@@ -196,16 +201,16 @@ namespace cassia {
     wgpu::Texture TileWorkgroupRasterizer::Rasterize(EncodingContext* context,
         wgpu::Buffer sortedPsegments, wgpu::Buffer stylingsBuffer,
         const Config& config) {
-        int32_t tilesPerRow = 1 << (16 - TILE_WIDTH_SHIFT);
-        uint32_t tileRowCount = (config.height + TILE_HEIGHT_SHIFT - 1) >> TILE_HEIGHT_SHIFT;
-        uint32_t tileRangeCount = tilesPerRow * tileRowCount;
+        uint32_t widthInTiles = (config.width + TILE_WIDTH_SHIFT - 1) >> TILE_WIDTH_SHIFT;
+        uint32_t heightInTiles = (config.height + TILE_HEIGHT_SHIFT - 1) >> TILE_HEIGHT_SHIFT;
+        uint32_t tileRangeCount = (widthInTiles + 1) * heightInTiles;
 
         ConfigUniforms uniformData = {
             config.width,
             config.height,
+            widthInTiles,
+            heightInTiles,
             config.segmentCount,
-            tilesPerRow,
-            tileRowCount,
             tileRangeCount
         };
         wgpu::Buffer uniforms = utils::CreateBufferFromData(
@@ -266,7 +271,7 @@ namespace cassia {
 
             pass->SetBindGroup(0, bg);
             pass->SetPipeline(mRasterPipeline);
-            pass->Dispatch(tileRowCount);
+            pass->Dispatch(heightInTiles);
         }
 
         return outTexture;
