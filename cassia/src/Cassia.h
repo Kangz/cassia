@@ -24,8 +24,8 @@
 
 typedef struct CassiaStyling {
     float fill[4];
-    uint32_t fill_rule;
-    uint32_t blend_mode;
+    uint32_t fillRule;
+    uint32_t blendMode;
     uint32_t _padding[2];
 } CassiaStyling;
 

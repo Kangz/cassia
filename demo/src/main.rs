@@ -135,7 +135,7 @@ fn render_with_cassia(width: usize, height: usize, composition: &mut Composition
 fn main() {
     let width = 1000;
     let height = 1000;
-    let circles = 1;
+    let circles = 10;
     let radius_range = 10.0..50.0;
 
     let mut composition = Composition::new();
@@ -153,7 +153,7 @@ fn main() {
             ),
         );
 
-        let color = [rng.gen(), rng.gen(), rng.gen(), 1.0];
+        let color = [rng.gen(), rng.gen(), rng.gen(), 0.5];
 
         composition.get_mut(layer_id).unwrap().set_props(Props {
             func: Func::Draw(Style {
@@ -172,7 +172,7 @@ fn main() {
     }
 
     // capture_to_file(width, height, &mut composition);
-    segs_to_file(&mut composition);
-    stylings_to_file(&stylings);
+    // segs_to_file(&mut composition);
+    // stylings_to_file(&stylings);
     render_with_cassia(width, height, &mut composition, &stylings);
 }

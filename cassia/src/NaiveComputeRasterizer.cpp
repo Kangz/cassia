@@ -13,13 +13,14 @@ namespace cassia {
         : mDevice(std::move(device)) {
 
         // The config struct can be used directly to lay out a uniform buffer.
-        static_assert(sizeof(Config) == 12, "");
+        static_assert(sizeof(Config) == 16, "");
 
         std::string code = std::string(kPSegmentWGSL) + kStylingWGSL + R"(
             [[block]] struct Config {
                 width: u32;
                 height: u32;
-                count: u32;
+                segmentCount: u32;
+                stylingCount: u32;
             };
             [[group(0), binding(0)]] var<uniform> config : Config;
 
@@ -42,45 +43,37 @@ namespace cassia {
 
                 var accumulator = vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
-                var old_layer_id = psegment_layer(segments.data[0u]);
-                var cover = 0;
-                var area = 0;
-                for (var i = 0u; i < config.count; i = i + 1u) {
-                    var segment = segments.data[i];
-                    var layer_id = psegment_layer(segments.data[0]);
+                for (var layer = 0u; layer < config.stylingCount; layer = layer + 1u) {
+                    var cover = 0;
+                    var area = 0;
 
-                    if (old_layer_id != layer_id) {
-                        var styling = stylings.data[old_layer_id];
+                    for (var i = 0u; i < config.segmentCount; i = i + 1u) {
+                        var segment = segments.data[i];
+                        if (psegment_layer(segment) != layer) {
+                            continue;
+                        }
 
-                        var coverage = from_area(area + cover * PIXEL_SIZE, styling.fill_rule);
-                        accumulator = blend(accumulator, vec4<f32>(styling.fill.xyz, styling.fill.w * coverage), styling.blend_mode);
+                        if (psegment_is_none(segment)) {
+                            continue;
+                        }
 
-                        old_layer_id = layer_id;
-                        cover = 0;
-                        area = 0;
+                        var y = (psegment_tile_y(segment) << TILE_HEIGHT_SHIFT) + i32(psegment_local_y(segment));
+                        if (y != pos.y) {
+                            continue;
+                        }
+
+                        var x = (psegment_tile_x(segment) << TILE_WIDTH_SHIFT) + i32(psegment_local_x(segment));
+                        if (x < pos.x) {
+                            cover = cover + psegment_cover(segment);
+                        } elseif (x == pos.x) {
+                            area = area + psegment_area(segment);
+                        }
                     }
 
-                    if (psegment_is_none(segment)) {
-                        continue;
-                    }
-
-                    var y = (psegment_tile_y(segment) << TILE_HEIGHT_SHIFT) + i32(psegment_local_y(segment));
-                    if (y != pos.y) {
-                        continue;
-                    }
-
-                    var x = (psegment_tile_x(segment) << TILE_WIDTH_SHIFT) + i32(psegment_local_x(segment));
-                    if (x < pos.x) {
-                        cover = cover + psegment_cover(segment);
-                    } elseif (x == pos.x) {
-                        area = area + psegment_area(segment);
-                    }
+                    var styling = stylings.data[layer];
+                    var pixelCoverage = area + cover * PIXEL_SIZE;
+                    accumulator = styling_accumulate_layer(accumulator, pixelCoverage, styling);
                 }
-
-                var styling = stylings.data[old_layer_id];
-
-                var coverage = from_area(area + cover * PIXEL_SIZE, styling.fill_rule);
-                accumulator = blend(accumulator, vec4<f32>(styling.fill.xyz, styling.fill.w * coverage), styling.blend_mode);
 
                 textureStore(out, vec2<i32>(GlobalId.xy), accumulator);
             }

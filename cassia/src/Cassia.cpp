@@ -161,7 +161,7 @@ namespace cassia {
             // Run all the steps of the algorithm.
             EncodingContext context(mDevice, mTimestampsSupported);
 
-            NaiveComputeRasterizer::Config naiveConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
+            NaiveComputeRasterizer::Config naiveConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount), static_cast<uint32_t>(stylingCount)};
             wgpu::Texture picture = mNaiveRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, naiveConfig);
             
             TileWorkgroupRasterizer::Config tileConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};

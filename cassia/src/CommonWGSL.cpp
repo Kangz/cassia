@@ -34,6 +34,7 @@ namespace cassia {
         let TILE_HEIGHT_SHIFT = 3u;
         let TILE_X_OFFSET = 256;
         let PIXEL_SIZE = 16;
+        let PIXEL_AREA = 256;
 
         // TODO remove when all rasterizers use StylingWGSL
         let COVER_DIVISOR = 16.0;
@@ -70,32 +71,30 @@ namespace cassia {
     )";
 
     const char kStylingWGSL[] = R"(
-        let LAST_BYTE_MASK: i32 = 255;
-        let LAST_BIT_MASK: i32 = 1;
+        let LAST_BYTE_MASK: i32 = 255; // PIXEL_AREA - 1
 
         struct Styling {
             fill: vec4<f32>;
-            fill_rule: u32;
-            blend_mode: u32;
+            fillRule: u32;
+            blendMode: u32;
         };
 
-        fn from_area(area: i32, fill_rule: u32) -> f32 {
+        fn styling_coverage_to_alpha(area: i32, fillRule: u32) -> f32 {
             // NonZero
-            switch (fill_rule) {
+            switch (fillRule) {
                 // NonZero
                 case 0u: {
-                    return clamp(abs(f32(area) / 256.0), 0.0, 1.0);
+                    return clamp(abs(f32(area) / f32(PIXEL_AREA)), 0.0, 1.0);
                 }
                 // EvenOdd
                 default: {
-                    let number = area >> 8u;
-                    let masked = f32(area & LAST_BYTE_MASK);
-                    let capped = masked / 256.0;
+                    let windingNumber = area >> 8u;
+                    let fractionalPart = f32(area & LAST_BYTE_MASK) / f32(PIXEL_AREA);
 
-                    if ((number & LAST_BIT_MASK) == 0) {
-                        return capped;
+                    if ((windingNumber & 1) == 0) {
+                        return fractionalPart;
                     } else {
-                        return 1.0 - capped;
+                        return 1.0 - fractionalPart;
                     }
                 }
             }
@@ -104,130 +103,135 @@ namespace cassia {
             return 0.0;
         }
 
-        fn blend(dst: vec4<f32>, src: vec4<f32>, blend_mode: u32) -> vec4<f32> {
+        fn styling_do_blend(dst: vec4<f32>, src: vec4<f32>, blendMode: u32) -> vec4<f32> {
             let alpha = src.w;
-            let inv_alpha = 1.0 - alpha;
+            let inverseAlpha = 1.0 - alpha;
 
             var color: vec3<f32>;
-            let dst_color = dst.xyz;
-            let src_color = src.xyz * alpha;
+            let dstColor = dst.xyz;
+            let srcColor = src.xyz * alpha;
 
-            switch (blend_mode) {
+            switch (blendMode) {
                 // Over
                 case 0u: {
-                    color = src_color;
-
+                    color = srcColor;
                     break;
                 }
+
                 // Multiply
                 case 1u: {
-                    color = dst_color * src_color;
-
+                    color = dstColor * srcColor;
                     break;
                 }
+
                 // Screen
                 case 2u: {
-                    color = fma(dst_color, -src_color, src_color);
-
+                    color = fma(dstColor, -srcColor, srcColor);
                     break;
                 }
+
                 // Overlay
                 case 3u: {
                     color = 2.0 * select(
-                        (dst_color + src_color - fma(dst_color, src_color, vec3<f32>(0.5))),
-                        dst_color * src_color,
-                        src_color <= vec3<f32>(0.5),
+                        (dstColor + srcColor - fma(dstColor, srcColor, vec3<f32>(0.5))),
+                        dstColor * srcColor,
+                        srcColor <= vec3<f32>(0.5),
                     );
-
                     break;
                 }
+
                 // Darken
                 case 4u: {
-                    color = min(dst_color, src_color);
-
+                    color = min(dstColor, srcColor);
                     break;
                 }
+
                 // Lighten
                 case 5u: {
-                    color = max(dst_color, src_color);
-
+                    color = max(dstColor, srcColor);
                     break;
                 }
+
                 // ColorDodge
                 case 6u: {
                     color = select(
-                        min(vec3<f32>(1.0), src_color / (vec3<f32>(1.0) - dst_color)),
+                        min(vec3<f32>(1.0), srcColor / (vec3<f32>(1.0) - dstColor)),
                         vec3<f32>(0.0),
-                        src_color == vec3<f32>(0.0),
+                        srcColor == vec3<f32>(0.0),
                     );
-
                     break;
                 }
+
                 // ColorBurn
                 case 7u: {
                     color = select(
-                        vec3<f32>(1.0) - min(vec3<f32>(1.0), (vec3<f32>(1.0) - src_color) / dst_color),
+                        vec3<f32>(1.0) - min(vec3<f32>(1.0), (vec3<f32>(1.0) - srcColor) / dstColor),
                         vec3<f32>(1.0),
-                        src_color == vec3<f32>(1.0),
+                        srcColor == vec3<f32>(1.0),
                     );
-
                     break;
                 }
+
                 // HardLight
                 case 8u: {
                     color = 2.0 * select(
-                        dst_color + src_color - fma(dst_color, src_color, vec3<f32>(0.5)),
-                        dst_color * src_color,
-                        dst_color <= vec3<f32>(0.5),
+                        dstColor + srcColor - fma(dstColor, srcColor, vec3<f32>(0.5)),
+                        dstColor * srcColor,
+                        dstColor <= vec3<f32>(0.5),
                     );
-
                     break;
                 }
+
                 // SoftLight
                 case 9u: {
                     let d = select(
-                        sqrt(src_color),
-                        src_color * fma(
-                            fma(vec3<f32>(16.0), src_color, vec3<f32>(-12.0)),
-                            src_color,
+                        sqrt(srcColor),
+                        srcColor * fma(
+                            fma(vec3<f32>(16.0), srcColor, vec3<f32>(-12.0)),
+                            srcColor,
                             vec3<f32>(4.0),
                         ),
-                        src_color <= vec3<f32>(0.25),
+                        srcColor <= vec3<f32>(0.25),
                     );
 
                     color = 2.0 * select(
                         fma(
-                            d - src_color,
-                            fma(vec3<f32>(2.0), dst_color, vec3<f32>(-1.0)),
-                            src_color
+                            d - srcColor,
+                            fma(vec3<f32>(2.0), dstColor, vec3<f32>(-1.0)),
+                            srcColor
                         ),
-                        src_color * (vec3<f32>(1.0) - src_color),
-                        dst_color <= vec3<f32>(0.5),
+                        srcColor * (vec3<f32>(1.0) - srcColor),
+                        dstColor <= vec3<f32>(0.5),
                     );
-
                     break;
                 }
+
                 // Difference
                 case 10u: {
-                    color = abs(dst_color - src_color);
-
+                    color = abs(dstColor - srcColor);
                     break;
                 }
+
                 // Exclusion
                 case 11u: {
                     color = fma(
-                        dst_color,
-                        fma(vec3<f32>(-2.0), src_color, vec3<f32>(1.0)),
-                        src_color,
+                        dstColor,
+                        fma(vec3<f32>(-2.0), srcColor, vec3<f32>(1.0)),
+                        srcColor,
                     );
-
                     break;
-                
                 }
+
                 default: { break; }
             }
 
-            return fma(dst, vec4<f32>(inv_alpha), vec4<f32>(color, alpha));
+            return fma(dst, vec4<f32>(inverseAlpha), vec4<f32>(color, alpha));
+        }
+
+        fn styling_accumulate_layer(previousLayers: vec4<f32>, pixelCoverage: i32, styling: Styling) -> vec4<f32> {
+            var coverageAlpha = styling_coverage_to_alpha(pixelCoverage, styling.fillRule);
+            var currentLayer = vec4<f32>(styling.fill.xyz, styling.fill.w * coverageAlpha);
+            return styling_do_blend(previousLayers, currentLayer, styling.blendMode);
         }
     )";
 

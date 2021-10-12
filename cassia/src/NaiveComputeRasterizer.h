@@ -15,6 +15,7 @@ namespace cassia {
             uint32_t width;
             uint32_t height;
             uint32_t segmentCount;
+            uint32_t stylingCount;
         };
         wgpu::Texture Rasterize(EncodingContext* context,
             wgpu::Buffer sortedPsegments, wgpu::Buffer stylingsBuffer,
