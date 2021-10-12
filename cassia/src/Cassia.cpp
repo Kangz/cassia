@@ -15,10 +15,18 @@
 #include "utils/ComboRenderPipelineDescriptor.h"
 
 #include <algorithm>
+#include <array>
 #include <iostream>
 #include <memory>
 
 namespace cassia {
+
+    enum Raster {
+        RasterNaive,
+        RasterTile,
+        RasterTile2,
+        Raster_Count,
+    };
 
     class Cassia {
       public:
@@ -121,9 +129,9 @@ namespace cassia {
             mBlitPipeline = mDevice.CreateRenderPipeline(&pDesc);
 
             // Create sub components
-            mNaiveRasterizer = std::make_unique<NaiveComputeRasterizer>(mDevice);
-            mTileRasterizer = std::make_unique<TileWorkgroupRasterizer>(mDevice);
-            mTileRasterizer2 = std::make_unique<TileWorkgroupRasterizer2>(mDevice);
+            mRasterizers[RasterNaive] = std::make_unique<NaiveComputeRasterizer>(mDevice);
+            mRasterizers[RasterTile] = std::make_unique<TileWorkgroupRasterizer>(mDevice);
+            mRasterizers[RasterTile2] = std::make_unique<TileWorkgroupRasterizer2>(mDevice);
         }
 
         void Render(
@@ -161,14 +169,25 @@ namespace cassia {
             // Run all the steps of the algorithm.
             EncodingContext context(mDevice, mTimestampsSupported);
 
-            NaiveComputeRasterizer::Config naiveConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount), static_cast<uint32_t>(stylingCount)};
-            wgpu::Texture picture = mNaiveRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, naiveConfig);
-            
-            TileWorkgroupRasterizer::Config tileConfig = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-            wgpu::Texture _ = mTileRasterizer->Rasterize(&context, sortedPsegments, stylingsBuffer, tileConfig);
-            
-            TileWorkgroupRasterizer2::Config tileConfig2 = {mWidth, mHeight, static_cast<uint32_t>(psegmentCount)};
-            wgpu::Texture unusedPicture2 = mTileRasterizer2->Rasterize(&context, sortedPsegments, stylingsBuffer, tileConfig2);
+            // ----- THIS IS STUFF YOU CHANGE TO SELECT WHAT TO RUN
+            Raster rasterOnScreen = RasterTile;
+            std::vector<Raster> rastersToBench = {RasterNaive, RasterTile, RasterTile2};
+            // -----
+
+            Rasterizer::Config config = {
+                mWidth,
+                mHeight,
+                static_cast<uint32_t>(psegmentCount),
+                static_cast<uint32_t>(stylingCount)
+            };
+            wgpu::Texture picture;
+            for (Raster r : rastersToBench) {
+                wgpu::Texture tempPicture = mRasterizers[r]->Rasterize(&context, sortedPsegments, stylingsBuffer, config);
+                if (r == rasterOnScreen) {
+                    picture = tempPicture;
+                }
+            }
+            assert(picture != nullptr); // rasterOnScreen must be in rastersToBench.
 
             // Do the blit into the swapchain.
             {
@@ -195,8 +214,9 @@ namespace cassia {
         }
 
         ~Cassia() {
-            mNaiveRasterizer = nullptr;
-            mTileRasterizer = nullptr;
+            for (auto& rasterizer : mRasterizers) {
+                rasterizer = nullptr;
+            }
 
             mBlitPipeline = nullptr;
             mWindow = nullptr;
@@ -210,9 +230,7 @@ namespace cassia {
         }
 
       private:
-        std::unique_ptr<NaiveComputeRasterizer> mNaiveRasterizer;
-        std::unique_ptr<TileWorkgroupRasterizer> mTileRasterizer;
-        std::unique_ptr<TileWorkgroupRasterizer2> mTileRasterizer2;
+        std::array<std::unique_ptr<Rasterizer>, Raster_Count> mRasterizers;
 
         wgpu::RenderPipeline mBlitPipeline;
         wgpu::Queue mQueue;

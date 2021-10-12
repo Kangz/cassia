@@ -1,25 +1,18 @@
 #ifndef CASSIA_NAIVECOMPUTERASTERIZER_H
 #define CASSIA_NAIVECOMPUTERASTERIZER_H
 
-#include "webgpu/webgpu_cpp.h"
+#include "Rasterizer.h"
 
 namespace cassia {
 
-    class EncodingContext;
-
-    class NaiveComputeRasterizer {
+    class NaiveComputeRasterizer final : public Rasterizer {
       public:
         NaiveComputeRasterizer(wgpu::Device device);
+        ~NaiveComputeRasterizer() override = default;
 
-        struct Config {
-            uint32_t width;
-            uint32_t height;
-            uint32_t segmentCount;
-            uint32_t stylingCount;
-        };
         wgpu::Texture Rasterize(EncodingContext* context,
             wgpu::Buffer sortedPsegments, wgpu::Buffer stylingsBuffer,
-            const Config& config);
+            const Config& config) override;
 
       private:
         wgpu::Device mDevice;

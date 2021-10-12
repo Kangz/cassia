@@ -23,6 +23,7 @@ add_library(cassia SHARED
     src/EncodingContext.h
     src/NaiveComputeRasterizer.cpp
     src/NaiveComputeRasterizer.h
+    src/Rasterizer.h
     src/TileWorkgroupRasterizer.cpp
     src/TileWorkgroupRasterizer.h
     src/TileWorkgroupRasterizer2.cpp
