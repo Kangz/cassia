@@ -16,9 +16,10 @@ namespace cassia {
         uint32_t height;
         uint32_t segmentCount;
         int32_t tilesPerRow;
+        uint32_t tileRowCount;
         uint32_t tileRangeCount;
     };
-    static_assert(sizeof(ConfigUniforms) == 20, "");
+    static_assert(sizeof(ConfigUniforms) == 24, "");
 
     struct TileRange {
         uint32_t start;
@@ -33,6 +34,7 @@ namespace cassia {
                 height: u32;
                 segmentCount: u32;
                 tilesPerRow: i32;
+                tileRowCount: u32;
                 tileRangeCount: u32;
             };
             [[group(0), binding(0)]] var<uniform> config : Config;
@@ -155,34 +157,23 @@ namespace cassia {
                 }
             }
 
-            // Ewwwww can we do better than this? Maybe a prepass that puts in cover carry storage?
-            // Or maybe an alternative representation for psegments based on tileY sign:
-            //      "sort psegment in (tileY, tileX, layerId) if tileY >= 0 but (tileY, layerId, localY) if tileY < 0"
-            fn countTileCoverOnOneInvocation(tileId: vec2<i32>, localId: vec2<u32>) {
-                var tileRange = tileRanges.data[tile_index(tileId.x, tileId.y)];
-
-                for (var i = tileRange.start; i < tileRange.end; i = i + 1u) {
-                    var segment = segments.data[i];
-                    var segmentLocalY = psegment_local_y(segment);
-                    coverCarry[segmentLocalY] = coverCarry[segmentLocalY] + psegment_cover(segment);
-                }
-            }
-
             // TODO doesn't handle stuff outside the screen.
             [[stage(compute), workgroup_size(8, 8)]]
             fn rasterizeTileRow([[builtin(workgroup_id)]] WorkgroupId : vec3<u32>,
                              [[builtin(local_invocation_id)]] LocalId : vec3<u32>) {
                 if (all(LocalId == vec3<u32>(0u))) {
-                    var tileId = vec2<i32>(- config.tilesPerRow / 2, i32(WorkgroupId.x));
-                    for (; tileId.x < 0; tileId.x = tileId.x  + 1) {
-                        countTileCoverOnOneInvocation(tileId, LocalId.xy);
+                    var tileRange = tileRanges.data[tile_index(-1, i32(WorkgroupId.x))];
+                    for (var i = tileRange.start; i < tileRange.end; i = i + 1u) {
+                        var segment = segments.data[i];
+                        var segmentLocalY = psegment_local_y(segment);
+                        coverCarry[segmentLocalY] = coverCarry[segmentLocalY] + psegment_cover(segment);
                     }
                 }
 
                 workgroupBarrier();
 
                 var tileId = vec2<i32>(0, i32(WorkgroupId.x));
-                for (; tileId.x < config.tilesPerRow; tileId.x = tileId.x + 1) {
+                for (; tileId.x < i32(config.tileRowCount); tileId.x = tileId.x + 1) {
                     rasterizeTile(tileId, LocalId.xy);
                     workgroupBarrier();
                 }
@@ -214,6 +205,7 @@ namespace cassia {
             config.height,
             config.segmentCount,
             tilesPerRow,
+            tileRowCount,
             tileRangeCount
         };
         wgpu::Buffer uniforms = utils::CreateBufferFromData(
