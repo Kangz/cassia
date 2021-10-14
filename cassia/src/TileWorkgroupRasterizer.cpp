@@ -110,26 +110,6 @@ namespace cassia {
                 data: array<Styling>;
             };
 
-            struct LayerCarry {
-                layer: u32;
-                rows: array<i32, 8>;
-            };
-            fn layer_carry_init(carry: ptr<function, LayerCarry, read_write>, layer: u32) {
-                (*carry).layer = layer;
-                for (var i = 0u; i < 8u; i = i + 1u) {
-                    (*carry).rows[i] = 0;
-                }
-            }
-
-            let INVALID_LAYER = 0xFFFFu;
-            let WORKGROUP_CARRIES = 10u;
-            struct LayerCarryQueue {
-                count: u32;
-                data: array<LayerCarry, WORKGROUP_CARRIES>;
-            };
-
-            var<workgroup> carries : array<LayerCarryQueue, 2>;
-
             [[group(0), binding(3)]] var<storage> stylings : Stylings;
             [[group(0), binding(4)]] var out : texture_storage_2d<rgba16float, write>;
 
@@ -139,17 +119,34 @@ namespace cassia {
                 *accumulator = styling_accumulate_layer(*accumulator, pixelCoverage, styling);
             }
 
-            fn store_layer_carry(carryFlip: u32, carry: LayerCarry) {
-                // TODO maybe don't check that and instead early out in various places if we have no psegment?
-                if (carry.layer == INVALID_LAYER) {
-                    return;
-                }
+            type CarryCovers = array<i32, 8>;
 
+            let INVALID_LAYER = 0xFFFFu;
+            let WORKGROUP_CARRIES = 10u;
+            struct LayerCarry {
+                layer: u32;
+                rows: CarryCovers;
+            };
+            struct LayerCarryQueue {
+                count: u32;
+                data: array<LayerCarry, WORKGROUP_CARRIES>;
+            };
+
+            var<private> storeCarryIndex : u32 = 0u;
+            var<private> readLayerIndex : u32 = 0u;
+            var<workgroup> carries : array<LayerCarryQueue, 2>;
+
+            fn flip_carry_stores() {
+                storeCarryIndex = 1u - storeCarryIndex;
+                carries[storeCarryIndex].count = 0u;
+                readLayerIndex = 0u;
+            }
+            fn append_output_layer_carry(layer: u32, covers: CarryCovers) {
                 // Really??? Can we get rid of var vs. let already?
-                var localCarry = carry;
+                var localCovers = covers;
                 var needsStore = false;
                 for (var i = 0u; i < 8u; i = i + 1u) {
-                    if (localCarry.rows[i] != 0) {
+                    if (localCovers[i] != 0) {
                         needsStore = true;
                     }
                 }
@@ -157,94 +154,89 @@ namespace cassia {
                     return;
                 }
 
-                if (carries[carryFlip].count >= WORKGROUP_CARRIES) {
+                if (carries[storeCarryIndex].count >= WORKGROUP_CARRIES) {
                     // TODO fallback to memory storage.
                     return;
                 }
 
-                carries[carryFlip].data[carries[carryFlip].count] = carry;
-                carries[carryFlip].count = carries[carryFlip].count + 1u;
+                carries[storeCarryIndex].data[carries[storeCarryIndex].count].rows = covers;
+                carries[storeCarryIndex].data[carries[storeCarryIndex].count].layer = layer;
+                carries[storeCarryIndex].count = carries[storeCarryIndex].count + 1u;
             }
 
-            fn load_layer_carry(carryFlip: u32, index: u32, maxLayer: u32,
-                                out: ptr<function, LayerCarry, read_write>) -> bool {
-                if (index >= carries[carryFlip].count) {
-                    return false;
-                }
-
-                if (carries[carryFlip].data[index].layer > maxLayer) {
-                    return false;
-                }
-
-                if (carries[carryFlip].count >= WORKGROUP_CARRIES) {
+            fn consume_input_layer_carry(out: ptr<function, CarryCovers, read_write>) {
+                if (readLayerIndex >= WORKGROUP_CARRIES) {
                     // TODO fallback to memory storage.
-                    return false;
+                    return;
                 }
 
-                (*out) = carries[carryFlip].data[index];
-                return true;
+                var readIndex = 1u - storeCarryIndex;
+                (*out) = carries[readIndex].data[readLayerIndex].rows;
+                readLayerIndex = readLayerIndex + 1u;
+            }
+
+            fn peek_layer_for_next_input_layer_carry() -> u32 {
+                var readIndex = 1u - storeCarryIndex;
+                if (readLayerIndex < carries[readIndex].count) {
+                    return carries[readIndex].data[readLayerIndex].layer;
+                }
+                return INVALID_LAYER;
             }
 
             var<workgroup> wgCovers: array<i32, 8>;
-            fn store_tile_and_cover(carryFlip: u32, localId: vec2<u32>, layer: u32, cover: i32) {
+            fn store_tile_and_cover(localId: vec2<u32>, layer: u32, cover: i32) {
                 if (localId.x == 7u) {
                     wgCovers[localId.y] = cover;
                 }
                 workgroupBarrier();
 
                 if (all(localId == vec2<u32>(0u))) {
-                    var carry : LayerCarry;
-                    carry.layer = layer;
-                    carry.rows = wgCovers;
-                    store_layer_carry(carryFlip, carry);
+                    var covers = wgCovers;
+                    append_output_layer_carry(layer, covers);
                 }
                 workgroupBarrier();
             }
 
-            fn rasterizeTile(tileId: vec2<i32>, localId: vec2<u32>, carryFlip: u32) {
+            fn rasterizeTile(tileId: vec2<i32>, localId: vec2<u32>) {
                 var tileRange = tileRanges.data[tile_index(tileId.x, tileId.y)];
 
-                var currentCarry: LayerCarry;
-                currentCarry.layer = INVALID_LAYER;
+                var currentCovers: CarryCovers;
 
                 var accumulator = vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
                 var area = 0;
                 var cover = 0;
+                var currentLayer : u32 = INVALID_LAYER;
 
-                var inputCarryIndex = 0u;
                 var segmentIndex = tileRange.start;
 
                 loop {
+                    var carryLayer = peek_layer_for_next_input_layer_carry();
                     var segmentLayer = INVALID_LAYER;
-                    var carryLayer = INVALID_LAYER;
                     if (segmentIndex < tileRange.end) {
                         segmentLayer = psegment_layer(segments.data[segmentIndex]);
                     }
-                    if (inputCarryIndex < carries[1u - carryFlip].count) {
-                        carryLayer = carries[1u - carryFlip].data[inputCarryIndex].layer;
-                    }
+
                     if (segmentLayer == INVALID_LAYER && carryLayer == INVALID_LAYER) {
                         break;
                     }
 
                     var minLayer = min(carryLayer, segmentLayer);
-                    if (minLayer != currentCarry.layer) {
-                        if (currentCarry.layer != INVALID_LAYER) {
-                            accumulate(&accumulator, currentCarry.layer, cover, area);
-                            store_tile_and_cover(carryFlip, localId, currentCarry.layer, cover);
+                    if (minLayer != currentLayer) {
+                        if (currentLayer != INVALID_LAYER) {
+                            accumulate(&accumulator, currentLayer, cover, area);
+                            store_tile_and_cover(localId, currentLayer, cover);
                         }
 
                         area = 0;
                         cover = 0;
-                        layer_carry_init(&currentCarry, minLayer);
+                        currentCovers = CarryCovers();
+                        currentLayer = minLayer;
                     }
 
                     if (carryLayer == minLayer){
-                        ignore(load_layer_carry(1u - carryFlip, inputCarryIndex, minLayer, &currentCarry));
-                        inputCarryIndex = inputCarryIndex + 1u;
-
-                        cover = currentCarry.rows[localId.y];
+                        consume_input_layer_carry(&currentCovers);
+                        cover = currentCovers[localId.y];
                         continue;
                     }
 
@@ -271,9 +263,9 @@ namespace cassia {
                     }
                 }
 
-                if (currentCarry.layer != INVALID_LAYER) {
-                    accumulate(&accumulator, currentCarry.layer, cover, area);
-                    store_tile_and_cover(carryFlip, localId, currentCarry.layer, cover);
+                if (currentLayer != INVALID_LAYER) {
+                    accumulate(&accumulator, currentLayer, cover, area);
+                    store_tile_and_cover(localId, currentLayer, cover);
                 }
 
                 textureStore(out, tileId * 8 + vec2<i32>(localId.xy), accumulator);
@@ -282,41 +274,39 @@ namespace cassia {
             [[stage(compute), workgroup_size(8, 8)]]
             fn rasterizeTileRow([[builtin(workgroup_id)]] WorkgroupId : vec3<u32>,
                                 [[builtin(local_invocation_id)]] LocalId : vec3<u32>) {
-                var carryFlip = 0u;
-                if (all(LocalId == vec3<u32>(0u))) {
-                    carries[0].count = 0u;
-                    carries[1].count = 0u;
+                flip_carry_stores();
 
+                if (all(LocalId == vec3<u32>(0u))) {
                     var tileRange = tileRanges.data[tile_index(-1, i32(WorkgroupId.x))];
 
-                    var currentCarry : LayerCarry;
-                    currentCarry.layer = INVALID_LAYER;
+                    var currentCovers : CarryCovers;
+                    var currentLayer = INVALID_LAYER;
 
                     for (var i = tileRange.start; i < tileRange.end; i = i + 1u) {
                         var segment = segments.data[i];
                         var segmentLayer = psegment_layer(segment);
 
-                        if (currentCarry.layer != segmentLayer) {
-                            store_layer_carry(carryFlip, currentCarry);
-                            layer_carry_init(&currentCarry, segmentLayer);
+                        if (currentLayer != segmentLayer) {
+                            append_output_layer_carry(currentLayer, currentCovers);
+                            currentCovers = CarryCovers();
+                            currentLayer = segmentLayer;
                         }
 
                         var localY = psegment_local_y(segment);
                         var cover = psegment_cover(segment);
-                        currentCarry.rows[localY] = currentCarry.rows[localY] + cover;
+                        currentCovers[localY] = currentCovers[localY] + cover;
                     }
-                    store_layer_carry(carryFlip, currentCarry);
+                    append_output_layer_carry(currentLayer, currentCovers);
                 }
 
-                carryFlip = 1u - carryFlip;
+                flip_carry_stores();
                 workgroupBarrier();
 
                 var tileId = vec2<i32>(0, i32(WorkgroupId.x));
                 for (; tileId.x < i32(config.widthInTiles); tileId.x = tileId.x + 1) {
-                    rasterizeTile(tileId, LocalId.xy, carryFlip);
+                    rasterizeTile(tileId, LocalId.xy);
                     workgroupBarrier();
-                    carryFlip = 1u - carryFlip;
-                    carries[carryFlip].count = 0u;
+                    flip_carry_stores();
                 }
             }
         )";

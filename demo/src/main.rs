@@ -135,7 +135,7 @@ fn render_with_cassia(width: usize, height: usize, composition: &mut Composition
 fn main() {
     let width = 1000;
     let height = 1000;
-    let circles = 10;
+    let circles = 100;
     let radius_range = 10.0..50.0;
 
     let mut composition = Composition::new();

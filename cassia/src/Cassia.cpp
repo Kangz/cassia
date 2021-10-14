@@ -172,7 +172,7 @@ namespace cassia {
 
             // ----- THIS IS STUFF YOU CHANGE TO SELECT WHAT TO RUN
             Raster rasterOnScreen = RasterTile;
-            std::vector<Raster> rastersToBench = {RasterNaive, RasterTile, RasterTile2};
+            std::vector<Raster> rastersToBench = {RasterTile, RasterTile2};
             // -----
 
             Rasterizer::Config config = {
