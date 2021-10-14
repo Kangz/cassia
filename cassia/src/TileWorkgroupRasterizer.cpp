@@ -44,6 +44,10 @@ namespace cassia {
             };
             [[group(0), binding(1)]] var<storage> segments : PSegments;
 
+            ///////////////////////////////////////////////////////////////////
+            //  Tile ranges
+            ///////////////////////////////////////////////////////////////////
+
             struct Range {
                 start: u32;
                 end: u32; // Exclusive
@@ -106,6 +110,10 @@ namespace cassia {
                 }
             }
 
+            ///////////////////////////////////////////////////////////////////
+            //  Misc styling and output
+            ///////////////////////////////////////////////////////////////////
+
             [[block]] struct Stylings {
                 data: array<Styling>;
             };
@@ -119,9 +127,17 @@ namespace cassia {
                 *accumulator = styling_accumulate_layer(*accumulator, pixelCoverage, styling);
             }
 
-            type CarryCovers = array<i32, 8>;
+            ///////////////////////////////////////////////////////////////////
+            // Carry queues
+            ///////////////////////////////////////////////////////////////////
 
+            // We need constexprs....
+            let TILE_WIDTH = 8;
+            let TILE_WIDTH_PLUS_ONE = 9;
             let INVALID_LAYER = 0xFFFFu;
+            let WORKGROUP_SIZE = 8u;
+            type CarryCovers = array<i32, WORKGROUP_SIZE>;
+
             let WORKGROUP_CARRIES = 10u;
             struct LayerCarry {
                 layer: u32;
@@ -145,7 +161,7 @@ namespace cassia {
                 // Really??? Can we get rid of var vs. let already?
                 var localCovers = covers;
                 var needsStore = false;
-                for (var i = 0u; i < 8u; i = i + 1u) {
+                for (var i = 0u; i < WORKGROUP_SIZE; i = i + 1u) {
                     if (localCovers[i] != 0) {
                         needsStore = true;
                     }
@@ -164,15 +180,15 @@ namespace cassia {
                 carries[storeCarryIndex].count = carries[storeCarryIndex].count + 1u;
             }
 
-            fn consume_input_layer_carry(out: ptr<function, CarryCovers, read_write>) {
+            fn consume_input_layer_carry(localY: u32) -> i32 {
                 if (readLayerIndex >= WORKGROUP_CARRIES) {
                     // TODO fallback to memory storage.
-                    return;
+                    return 0;
                 }
 
                 var readIndex = 1u - storeCarryIndex;
-                (*out) = carries[readIndex].data[readLayerIndex].rows;
                 readLayerIndex = readLayerIndex + 1u;
+                return carries[readIndex].data[readLayerIndex - 1u].rows[localY];
             }
 
             fn peek_layer_for_next_input_layer_carry() -> u32 {
@@ -183,31 +199,71 @@ namespace cassia {
                 return INVALID_LAYER;
             }
 
-            var<workgroup> wgCovers: array<i32, 8>;
-            fn store_tile_and_cover(localId: vec2<u32>, layer: u32, cover: i32) {
-                if (localId.x == 7u) {
-                    wgCovers[localId.y] = cover;
+            var<workgroup> subgroupAllBool : bool;
+            fn fakeSubgroupAll(b: bool) -> bool {
+                subgroupAllBool = false;
+                workgroupBarrier();
+                if (b) {
+                    subgroupAllBool = true;
                 }
                 workgroupBarrier();
+                return subgroupAllBool;
+            }
 
-                if (all(localId == vec2<u32>(0u))) {
-                    var covers = wgCovers;
-                    append_output_layer_carry(layer, covers);
+            var<workgroup> foo : atomic<i32>;
+            fn append_output_layer_carry2(layer: u32, localY: u32, cover: i32) {
+                // very bad SubgroupAll because the one below doesn't work.
+                workgroupBarrier();
+                atomicStore(&foo, 0);
+                workgroupBarrier();
+                ignore(atomicAdd(&foo, abs(cover)));
+                workgroupBarrier();
+                if (atomicLoad(&foo) == 0) {
+                    return;
                 }
+
+                // if (fakeSubgroupAll(cover == 0)) {
+                //     return;
+                // }
+
+                if (carries[storeCarryIndex].count >= WORKGROUP_CARRIES) {
+                    // TODO fallback to memory storage.
+                    return;
+                }
+
+                carries[storeCarryIndex].data[carries[storeCarryIndex].count].rows[localY] = cover;
+                carries[storeCarryIndex].data[carries[storeCarryIndex].count].layer = layer;
+                carries[storeCarryIndex].count = carries[storeCarryIndex].count + 1u;
+            }
+
+            ///////////////////////////////////////////////////////////////////
+            //  Main tile rasterization
+            ///////////////////////////////////////////////////////////////////
+
+            var<workgroup> areas : array<array<atomic<i32>, WORKGROUP_SIZE>, TILE_WIDTH>;
+            var<workgroup> covers : array<array<atomic<i32>, WORKGROUP_SIZE>, TILE_WIDTH_PLUS_ONE>;
+            var<workgroup> accumulators : array<array<vec4<f32>, WORKGROUP_SIZE>, TILE_WIDTH>;
+
+            fn accumulate_layer_and_save_carry(layer: u32, localY: u32) {
+                workgroupBarrier();
+                var cover = 0;
+                for (var x = 0; x < TILE_WIDTH; x = x + 1) {
+                    var area = atomicExchange(&areas[x][localY], 0);
+                    cover = cover + atomicExchange(&covers[x][localY], 0);
+
+                    var localAccumulator = accumulators[x][localY];
+                    accumulate(&localAccumulator, layer, cover, area);
+                    accumulators[x][localY] = localAccumulator;
+                }
+                cover = cover + atomicExchange(&covers[TILE_WIDTH][localY], 0);
+                append_output_layer_carry2(layer, localY, cover);
                 workgroupBarrier();
             }
 
-            fn rasterizeTile(tileId: vec2<i32>, localId: vec2<u32>) {
+            fn rasterizeTile(tileId: vec2<i32>, localY: u32) {
                 var tileRange = tileRanges.data[tile_index(tileId.x, tileId.y)];
 
-                var currentCovers: CarryCovers;
-
-                var accumulator = vec4<f32>(0.0, 0.0, 0.0, 1.0);
-
-                var area = 0;
-                var cover = 0;
                 var currentLayer : u32 = INVALID_LAYER;
-
                 var segmentIndex = tileRange.start;
 
                 loop {
@@ -224,59 +280,53 @@ namespace cassia {
                     var minLayer = min(carryLayer, segmentLayer);
                     if (minLayer != currentLayer) {
                         if (currentLayer != INVALID_LAYER) {
-                            accumulate(&accumulator, currentLayer, cover, area);
-                            store_tile_and_cover(localId, currentLayer, cover);
+                            accumulate_layer_and_save_carry(currentLayer, localY);
                         }
-
-                        area = 0;
-                        cover = 0;
-                        currentCovers = CarryCovers();
                         currentLayer = minLayer;
                     }
 
                     if (carryLayer == minLayer){
-                        consume_input_layer_carry(&currentCovers);
-                        cover = currentCovers[localId.y];
+                        atomicStore(&covers[0][localY], consume_input_layer_carry(localY));
                         continue;
                     }
 
                     if (segmentLayer == minLayer) {
+                        // TODO rework completely to load multiple segments at once
                         var segment = segments.data[segmentIndex];
                         segmentIndex = segmentIndex + 1u;
 
-                        if (psegment_local_y(segment) != localId.y) {
+                        if (psegment_local_y(segment) != localY) {
                             continue;
                         }
 
                         var segmentLocalX = psegment_local_x(segment);
-                        if (segmentLocalX <= localId.x) {
-                            var segmentCover = psegment_cover(segment);
-                            cover = cover + segmentCover;
-                            if (segmentLocalX == localId.x) {
-                                area = area + psegment_area(segment);
-                                // Remove the extra coverage we counted
-                                area = area - PIXEL_SIZE * segmentCover;
-                            }
-                        }
+                        var segmentCover = psegment_cover(segment);
+                        var segmentArea = psegment_area(segment);
 
+                        ignore(atomicAdd(&covers[segmentLocalX + 1u][localY], segmentCover));
+                        ignore(atomicAdd(&areas[segmentLocalX][localY], segmentArea));
                         continue;
                     }
                 }
 
                 if (currentLayer != INVALID_LAYER) {
-                    accumulate(&accumulator, currentLayer, cover, area);
-                    store_tile_and_cover(localId, currentLayer, cover);
+                    accumulate_layer_and_save_carry(currentLayer, localY);
                 }
 
-                textureStore(out, tileId * 8 + vec2<i32>(localId.xy), accumulator);
+                for (var x = 0; x < TILE_WIDTH; x = x + 1) {
+                    textureStore(out, tileId * 8 + vec2<i32>(x, i32(localY)), accumulators[x][localY]);
+                    accumulators[x][localY] = vec4<f32>(0.0);
+                }
             }
 
-            [[stage(compute), workgroup_size(8, 8)]]
+            [[stage(compute), workgroup_size(WORKGROUP_SIZE)]]
             fn rasterizeTileRow([[builtin(workgroup_id)]] WorkgroupId : vec3<u32>,
                                 [[builtin(local_invocation_id)]] LocalId : vec3<u32>) {
                 flip_carry_stores();
 
-                if (all(LocalId == vec3<u32>(0u))) {
+                var localY = LocalId.x;
+                // TODO make parallel over whole subgroup
+                if (localY == 0u) {
                     var tileRange = tileRanges.data[tile_index(-1, i32(WorkgroupId.x))];
 
                     var currentCovers : CarryCovers;
@@ -292,20 +342,21 @@ namespace cassia {
                             currentLayer = segmentLayer;
                         }
 
-                        var localY = psegment_local_y(segment);
+                        var segmentLocalY = psegment_local_y(segment);
                         var cover = psegment_cover(segment);
-                        currentCovers[localY] = currentCovers[localY] + cover;
+                        currentCovers[segmentLocalY] = currentCovers[segmentLocalY] + cover;
                     }
                     append_output_layer_carry(currentLayer, currentCovers);
                 }
 
-                flip_carry_stores();
                 workgroupBarrier();
+                flip_carry_stores();
 
                 var tileId = vec2<i32>(0, i32(WorkgroupId.x));
                 for (; tileId.x < i32(config.widthInTiles); tileId.x = tileId.x + 1) {
-                    rasterizeTile(tileId, LocalId.xy);
-                    workgroupBarrier();
+                    rasterizeTile(tileId, localY);
+
+                    workgroupBarrier(); // TODO not needed? or put in the flipping of carry stores?
                     flip_carry_stores();
                 }
             }
