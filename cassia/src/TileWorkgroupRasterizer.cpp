@@ -77,7 +77,7 @@ namespace cassia {
                         var tileX = psegment_tile_x(segment);
                         var tileY = psegment_tile_y(segment);
 
-                        if (tile_in_bounds(tileX, tileY)) {
+                        if (!psegment_is_none(segment) && tile_in_bounds(tileX, tileY)) {
                             var tileIndex = tile_index(tileX, tileY);
                             tileRanges.data[tileIndex].end = GlobalId.x + 1u;
                         }
@@ -97,13 +97,13 @@ namespace cassia {
                 var tileY0 = psegment_tile_y(segment0);
                 var tileY1 = psegment_tile_y(segment1);
 
-                if (tileX0 != tileX1 || tileY0 != tileY1) {
+                if (!psegment_is_none(segment0) && (tileX0 != tileX1 || tileY0 != tileY1 || psegment_is_none(segment1))) {
                     if (tile_in_bounds(tileX0, tileY0)) {
                         var tileIndex0 = tile_index(tileX0, tileY0);
                         tileRanges.data[tileIndex0].end = GlobalId.x + 1u;
                     }
 
-                    if (tile_in_bounds(tileX1, tileY1)) {
+                    if (!psegment_is_none(segment1) && tile_in_bounds(tileX1, tileY1)) {
                         var tileIndex1 = tile_index(tileX1, tileY1);
                         tileRanges.data[tileIndex1].start = GlobalId.x + 1u;
                     }
