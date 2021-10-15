@@ -244,6 +244,9 @@ namespace cassia {
             var<workgroup> covers : array<array<atomic<i32>, WORKGROUP_SIZE>, TILE_WIDTH_PLUS_ONE>;
             var<workgroup> accumulators : array<array<vec4<f32>, WORKGROUP_SIZE>, TILE_WIDTH>;
 
+            var<workgroup> psegmentsProcessed : atomic<u32>;
+            var<workgroup> nextPsegmentIndex : u32;
+
             fn accumulate_layer_and_save_carry(layer: u32, localY: u32) {
                 workgroupBarrier();
                 var cover = 0;
@@ -264,13 +267,17 @@ namespace cassia {
                 var tileRange = tileRanges.data[tile_index(tileId.x, tileId.y)];
 
                 var currentLayer : u32 = INVALID_LAYER;
-                var segmentIndex = tileRange.start;
+                if (localY == 0u) {
+                    nextPsegmentIndex = tileRange.start;
+                    atomicStore(&psegmentsProcessed, 0u);
+                }
 
                 loop {
+                    workgroupBarrier();
                     var carryLayer = peek_layer_for_next_input_layer_carry();
                     var segmentLayer = INVALID_LAYER;
-                    if (segmentIndex < tileRange.end) {
-                        segmentLayer = psegment_layer(segments.data[segmentIndex]);
+                    if (nextPsegmentIndex < tileRange.end) {
+                        segmentLayer = psegment_layer(segments.data[nextPsegmentIndex]);
                     }
 
                     if (segmentLayer == INVALID_LAYER && carryLayer == INVALID_LAYER) {
@@ -291,20 +298,26 @@ namespace cassia {
                     }
 
                     if (segmentLayer == minLayer) {
-                        // TODO rework completely to load multiple segments at once
-                        var segment = segments.data[segmentIndex];
-                        segmentIndex = segmentIndex + 1u;
+                        var segmentLocalIndex = nextPsegmentIndex + localY;
+                        if (segmentLocalIndex < tileRange.end) {
+                            var segment = segments.data[segmentLocalIndex];
+                            if (psegment_layer(segment) == segmentLayer) {
+                                ignore(atomicAdd(&psegmentsProcessed, 1u));
 
-                        if (psegment_local_y(segment) != localY) {
-                            continue;
+                                var segmentLocalX = psegment_local_x(segment);
+                                var segmentLocalY = psegment_local_y(segment);
+                                var segmentCover = psegment_cover(segment);
+                                var segmentArea = psegment_area(segment);
+
+                                ignore(atomicAdd(&covers[segmentLocalX + 1u][segmentLocalY], segmentCover));
+                                ignore(atomicAdd(&areas[segmentLocalX][segmentLocalY], segmentArea));
+                            }
                         }
 
-                        var segmentLocalX = psegment_local_x(segment);
-                        var segmentCover = psegment_cover(segment);
-                        var segmentArea = psegment_area(segment);
-
-                        ignore(atomicAdd(&covers[segmentLocalX + 1u][localY], segmentCover));
-                        ignore(atomicAdd(&areas[segmentLocalX][localY], segmentArea));
+                        workgroupBarrier();
+                        if (localY == 0u) {
+                            nextPsegmentIndex = nextPsegmentIndex + atomicExchange(&psegmentsProcessed, 0u);
+                        }
                         continue;
                     }
                 }
