@@ -4,7 +4,6 @@
 #include "CommonWGSL.h"
 #include "NaiveComputeRasterizer.h"
 #include "TileWorkgroupRasterizer.h"
-#include "TileWorkgroupRasterizer2.h"
 
 #include <webgpu/webgpu_cpp.h>
 #include <dawn/dawn_proc.h>
@@ -25,7 +24,6 @@ namespace cassia {
     enum Raster {
         RasterNaive,
         RasterTile,
-        RasterTile2,
         Raster_Count,
     };
 
@@ -132,7 +130,6 @@ namespace cassia {
             // Create sub components
             mRasterizers[RasterNaive] = std::make_unique<NaiveComputeRasterizer>(mDevice);
             mRasterizers[RasterTile] = std::make_unique<TileWorkgroupRasterizer>(mDevice);
-            mRasterizers[RasterTile2] = std::make_unique<TileWorkgroupRasterizer2>(mDevice);
         }
 
         void Render(
@@ -172,7 +169,7 @@ namespace cassia {
 
             // ----- THIS IS STUFF YOU CHANGE TO SELECT WHAT TO RUN
             Raster rasterOnScreen = RasterTile;
-            std::vector<Raster> rastersToBench = {RasterTile, RasterTile2};
+            std::vector<Raster> rastersToBench = {RasterTile};
             // -----
 
             Rasterizer::Config config = {

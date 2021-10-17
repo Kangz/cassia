@@ -26,8 +26,6 @@ add_library(cassia SHARED
     src/Rasterizer.h
     src/TileWorkgroupRasterizer.cpp
     src/TileWorkgroupRasterizer.h
-    src/TileWorkgroupRasterizer2.cpp
-    src/TileWorkgroupRasterizer2.h
 )
 target_link_libraries(cassia
     dawn_internal_config
