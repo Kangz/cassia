@@ -1,0 +1,15 @@
+[package]
+name = "painter"
+version = "0.1.0"
+authors = ["Dragoș Tiselice <dragostiselice@gmail.com>"]
+edition = "2018"
+resolver = "2"
+
+[dependencies]
+wgpu = "0.11"
+
+[dev-dependencies]
+env_logger = "0.8"
+pollster = "0.2"
+rand = { version = "0.8", features = ["small_rng"] }
+winit = "0.24"
