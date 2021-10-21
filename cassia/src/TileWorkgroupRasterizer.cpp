@@ -18,8 +18,9 @@ namespace cassia {
         uint32_t heightInTiles;
         uint32_t segmentCount;
         uint32_t tileRangeCount;
+        uint32_t carrySpillsPerRow;
     };
-    static_assert(sizeof(ConfigUniforms) == 24, "");
+    static_assert(sizeof(ConfigUniforms) == 28, "");
 
     struct TileRange {
         uint32_t start;
@@ -36,6 +37,7 @@ namespace cassia {
                 heightInTiles: i32;
                 segmentCount: u32;
                 tileRangeCount: u32;
+                carrySpillsPerRow: u32;
             };
             [[group(0), binding(0)]] var<uniform> config : Config;
 
@@ -118,8 +120,8 @@ namespace cassia {
                 data: array<Styling>;
             };
 
-            [[group(0), binding(3)]] var<storage> stylings : Stylings;
-            [[group(0), binding(4)]] var out : texture_storage_2d<rgba16float, write>;
+            [[group(0), binding(4)]] var<storage> stylings : Stylings;
+            [[group(0), binding(5)]] var out : texture_storage_2d<rgba16float, write>;
 
             fn accumulate(accumulator: ptr<function, vec4<f32>,read_write>, layer: u32, cover: i32, area: i32) {
                 var styling = stylings.data[layer];
@@ -148,6 +150,10 @@ namespace cassia {
                 data: array<LayerCarry, WORKGROUP_CARRIES>;
             };
 
+            [[block]] struct CarrySpill {
+                spills: array<LayerCarry>;
+            };
+            [[group(0), binding(3)]] var<storage, read_write> carrySpills : CarrySpill;
             var<private> storeCarryIndex : u32 = 0u;
             var<private> readLayerIndex : u32 = 0u;
             var<workgroup> carries : array<LayerCarryQueue, 2>;
@@ -157,7 +163,18 @@ namespace cassia {
                 carries[storeCarryIndex].count = 0u;
                 readLayerIndex = 0u;
             }
-            fn append_output_layer_carry(layer: u32, covers: CarryCovers) {
+            fn compute_carry_spill_index(out: ptr<function, u32, read_write>,
+                                         carryFlip: u32, tileY: i32, index: u32) -> bool {
+                if (index> config.carrySpillsPerRow) {
+                    return false;
+                }
+                *out = (index - config.carrySpillsPerRow) +
+                       u32(tileY) * config.carrySpillsPerRow +
+                       carryFlip * config.carrySpillsPerRow * u32(config.heightInTiles);
+                return true;
+            }
+
+            fn append_output_layer_carry(tileY: i32, layer: u32, covers: CarryCovers) {
                 // Really??? Can we get rid of var vs. let already?
                 var localCovers = covers;
                 var needsStore = false;
@@ -171,7 +188,14 @@ namespace cassia {
                 }
 
                 if (carries[storeCarryIndex].count >= WORKGROUP_CARRIES) {
-                    // TODO fallback to memory storage.
+                    var spillIndex : u32;
+                    if (!compute_carry_spill_index(&spillIndex,
+                            storeCarryIndex, tileY, carries[storeCarryIndex].count)) {
+                        return;
+                    }
+                    carrySpills.spills[spillIndex].rows = covers;
+                    carrySpills.spills[spillIndex].layer = layer;
+                    carries[storeCarryIndex].count = carries[storeCarryIndex].count + 1u;
                     return;
                 }
 
@@ -180,20 +204,34 @@ namespace cassia {
                 carries[storeCarryIndex].count = carries[storeCarryIndex].count + 1u;
             }
 
-            fn consume_input_layer_carry(localY: u32) -> i32 {
-                if (readLayerIndex >= WORKGROUP_CARRIES) {
-                    // TODO fallback to memory storage.
-                    return 0;
+            fn consume_input_layer_carry(tileY: i32, localY: u32) -> i32 {
+                var readIndex = 1u - storeCarryIndex;
+                var localLayerIndex = readLayerIndex;
+                readLayerIndex = readLayerIndex + 1u;
+
+                if (localLayerIndex >= WORKGROUP_CARRIES) {
+                    var spillIndex : u32;
+                    if (!compute_carry_spill_index(&spillIndex, readIndex, tileY, localLayerIndex)) {
+                        // Should never happen.
+                        return 0;
+                    }
+                    return carrySpills.spills[spillIndex].rows[localY];
                 }
 
-                var readIndex = 1u - storeCarryIndex;
-                readLayerIndex = readLayerIndex + 1u;
-                return carries[readIndex].data[readLayerIndex - 1u].rows[localY];
+                return carries[readIndex].data[localLayerIndex].rows[localY];
             }
 
-            fn peek_layer_for_next_input_layer_carry() -> u32 {
+            fn peek_layer_for_next_input_layer_carry(tileY: i32) -> u32 {
                 var readIndex = 1u - storeCarryIndex;
                 if (readLayerIndex < carries[readIndex].count) {
+                    if (readLayerIndex >= WORKGROUP_CARRIES) {
+                        var spillIndex : u32;
+                        if (!compute_carry_spill_index(&spillIndex, readIndex, tileY, readLayerIndex)) {
+                            // Should never happen.
+                            return 0u;
+                        }
+                        return carrySpills.spills[spillIndex].layer;
+                    }
                     return carries[readIndex].data[readLayerIndex].layer;
                 }
                 return INVALID_LAYER;
@@ -211,7 +249,7 @@ namespace cassia {
             }
 
             var<workgroup> foo : atomic<i32>;
-            fn append_output_layer_carry2(layer: u32, localY: u32, cover: i32) {
+            fn append_output_layer_carry2(tileY: i32, layer: u32, localY: u32, cover: i32) {
                 // very bad SubgroupAll because the one below doesn't work.
                 workgroupBarrier();
                 atomicStore(&foo, 0);
@@ -227,7 +265,14 @@ namespace cassia {
                 // }
 
                 if (carries[storeCarryIndex].count >= WORKGROUP_CARRIES) {
-                    // TODO fallback to memory storage.
+                    var spillIndex : u32;
+                    if (!compute_carry_spill_index(&spillIndex,
+                            storeCarryIndex, tileY, carries[storeCarryIndex].count)) {
+                        return;
+                    }
+                    carrySpills.spills[spillIndex].rows[localY] = cover;
+                    carrySpills.spills[spillIndex].layer = layer;
+                    carries[storeCarryIndex].count = carries[storeCarryIndex].count + 1u;
                     return;
                 }
 
@@ -247,7 +292,7 @@ namespace cassia {
             var<workgroup> psegmentsProcessed : atomic<u32>;
             var<workgroup> nextPsegmentIndex : u32;
 
-            fn accumulate_layer_and_save_carry(layer: u32, localY: u32) {
+            fn accumulate_layer_and_save_carry(tileY: i32, layer: u32, localY: u32) {
                 workgroupBarrier();
                 var cover = 0;
                 for (var x = 0; x < TILE_WIDTH; x = x + 1) {
@@ -259,7 +304,7 @@ namespace cassia {
                     accumulators[x][localY] = localAccumulator;
                 }
                 cover = cover + atomicExchange(&covers[TILE_WIDTH][localY], 0);
-                append_output_layer_carry2(layer, localY, cover);
+                append_output_layer_carry2(tileY, layer, localY, cover);
                 workgroupBarrier();
             }
 
@@ -274,7 +319,7 @@ namespace cassia {
 
                 loop {
                     workgroupBarrier();
-                    var carryLayer = peek_layer_for_next_input_layer_carry();
+                    var carryLayer = peek_layer_for_next_input_layer_carry(tileId.y);
                     var segmentLayer = INVALID_LAYER;
                     if (nextPsegmentIndex < tileRange.end) {
                         segmentLayer = psegment_layer(segments.data[nextPsegmentIndex]);
@@ -287,13 +332,13 @@ namespace cassia {
                     var minLayer = min(carryLayer, segmentLayer);
                     if (minLayer != currentLayer) {
                         if (currentLayer != INVALID_LAYER) {
-                            accumulate_layer_and_save_carry(currentLayer, localY);
+                            accumulate_layer_and_save_carry(tileId.y, currentLayer, localY);
                         }
                         currentLayer = minLayer;
                     }
 
                     if (carryLayer == minLayer){
-                        atomicStore(&covers[0][localY], consume_input_layer_carry(localY));
+                        atomicStore(&covers[0][localY], consume_input_layer_carry(tileId.y, localY));
                         continue;
                     }
 
@@ -323,7 +368,7 @@ namespace cassia {
                 }
 
                 if (currentLayer != INVALID_LAYER) {
-                    accumulate_layer_and_save_carry(currentLayer, localY);
+                    accumulate_layer_and_save_carry(tileId.y, currentLayer, localY);
                 }
 
                 for (var x = 0; x < TILE_WIDTH; x = x + 1) {
@@ -337,10 +382,11 @@ namespace cassia {
                                 [[builtin(local_invocation_id)]] LocalId : vec3<u32>) {
                 flip_carry_stores();
 
+                var tileY = i32(WorkgroupId.x);
                 var localY = LocalId.x;
                 // TODO make parallel over whole subgroup
                 if (localY == 0u) {
-                    var tileRange = tileRanges.data[tile_index(-1, i32(WorkgroupId.x))];
+                    var tileRange = tileRanges.data[tile_index(-1, tileY)];
 
                     var currentCovers : CarryCovers;
                     var currentLayer = INVALID_LAYER;
@@ -350,7 +396,7 @@ namespace cassia {
                         var segmentLayer = psegment_layer(segment);
 
                         if (currentLayer != segmentLayer) {
-                            append_output_layer_carry(currentLayer, currentCovers);
+                            append_output_layer_carry(tileY, currentLayer, currentCovers);
                             currentCovers = CarryCovers();
                             currentLayer = segmentLayer;
                         }
@@ -359,13 +405,13 @@ namespace cassia {
                         var cover = psegment_cover(segment);
                         currentCovers[segmentLocalY] = currentCovers[segmentLocalY] + cover;
                     }
-                    append_output_layer_carry(currentLayer, currentCovers);
+                    append_output_layer_carry(tileY, currentLayer, currentCovers);
                 }
 
                 workgroupBarrier();
                 flip_carry_stores();
 
-                var tileId = vec2<i32>(0, i32(WorkgroupId.x));
+                var tileId = vec2<i32>(0, tileY);
                 for (; tileId.x < i32(config.widthInTiles); tileId.x = tileId.x + 1) {
                     rasterizeTile(tileId, localY);
 
@@ -394,6 +440,7 @@ namespace cassia {
         uint32_t widthInTiles = (config.width + TILE_WIDTH_SHIFT - 1) >> TILE_WIDTH_SHIFT;
         uint32_t heightInTiles = (config.height + TILE_HEIGHT_SHIFT - 1) >> TILE_HEIGHT_SHIFT;
         uint32_t tileRangeCount = (widthInTiles + 1) * heightInTiles;
+        constexpr uint64_t kCarrySpillsPerRow = 100;
 
         ConfigUniforms uniformData = {
             config.width,
@@ -401,7 +448,8 @@ namespace cassia {
             widthInTiles,
             heightInTiles,
             config.segmentCount,
-            tileRangeCount
+            tileRangeCount,
+            kCarrySpillsPerRow,
         };
         wgpu::Buffer uniforms = utils::CreateBufferFromData(
                 mDevice, &uniformData, sizeof(uniformData), wgpu::BufferUsage::Uniform);
@@ -410,6 +458,12 @@ namespace cassia {
         tileRangeDesc.size = tileRangeCount *  sizeof(TileRange);
         tileRangeDesc.usage = wgpu::BufferUsage::Storage;
         wgpu::Buffer tileRangeBuffer = mDevice.CreateBuffer(&tileRangeDesc);
+
+        constexpr uint64_t kSizeofCarry = sizeof(uint32_t) + 8 * sizeof(int32_t);
+        wgpu::BufferDescriptor tileCarrySpillDesc;
+        tileCarrySpillDesc.size = 2 * kSizeofCarry * kCarrySpillsPerRow * heightInTiles;
+        tileCarrySpillDesc.usage = wgpu::BufferUsage::Storage;
+        wgpu::Buffer tileCarrySpillBuffer = mDevice.CreateBuffer(&tileCarrySpillDesc);
 
         {
             wgpu::BindGroup bg = utils::MakeBindGroup(mDevice, mTileRangePipeline.GetBindGroupLayout(0), {
@@ -445,8 +499,9 @@ namespace cassia {
                 {0, uniforms},
                 {1, sortedPsegments},
                 {2, tileRangeBuffer},
-                {3, stylingsBuffer},
-                {4, outTexture.CreateView()}
+                {3, tileCarrySpillBuffer},
+                {4, stylingsBuffer},
+                {5, outTexture.CreateView()}
             });
 
             {
