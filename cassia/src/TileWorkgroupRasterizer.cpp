@@ -237,32 +237,21 @@ namespace cassia {
                 return INVALID_LAYER;
             }
 
-            var<workgroup> subgroupAllBool : bool;
-            fn fakeSubgroupAll(b: bool) -> bool {
-                subgroupAllBool = false;
-                workgroupBarrier();
+            var<workgroup> subgroupAnyBool : bool;
+            fn fakeSubgroupAny(b: bool) -> bool {
+                var targetBool = !subgroupAnyBool;
                 if (b) {
-                    subgroupAllBool = true;
+                    subgroupAnyBool = targetBool;
                 }
                 workgroupBarrier();
-                return subgroupAllBool;
+                return (subgroupAnyBool == targetBool);
             }
 
             var<workgroup> foo : atomic<i32>;
             fn append_output_layer_carry2(tileY: i32, layer: u32, localY: u32, cover: i32) {
-                // very bad SubgroupAll because the one below doesn't work.
-                workgroupBarrier();
-                atomicStore(&foo, 0);
-                workgroupBarrier();
-                ignore(atomicAdd(&foo, abs(cover)));
-                workgroupBarrier();
-                if (atomicLoad(&foo) == 0) {
+                if (!fakeSubgroupAny(cover != 0)) {
                     return;
                 }
-
-                // if (fakeSubgroupAll(cover == 0)) {
-                //     return;
-                // }
 
                 if (carries[storeCarryIndex].count >= WORKGROUP_CARRIES) {
                     var spillIndex : u32;
@@ -285,9 +274,9 @@ namespace cassia {
             //  Main tile rasterization
             ///////////////////////////////////////////////////////////////////
 
-            var<workgroup> areas : array<array<atomic<i32>, WORKGROUP_SIZE>, TILE_WIDTH>;
+            var<workgroup> areas : array<array<atomic<i32>, WORKGROUP_SIZE>, TILE_WIDTH_PLUS_ONE>;
             var<workgroup> covers : array<array<atomic<i32>, WORKGROUP_SIZE>, TILE_WIDTH_PLUS_ONE>;
-            var<workgroup> accumulators : array<array<vec4<f32>, WORKGROUP_SIZE>, TILE_WIDTH>;
+            var<workgroup> accumulators : array<array<vec4<f32>, WORKGROUP_SIZE>, TILE_WIDTH_PLUS_ONE>;
 
             var<workgroup> psegmentsProcessed : atomic<u32>;
             var<workgroup> nextPsegmentIndex : u32;
@@ -339,7 +328,6 @@ namespace cassia {
 
                     if (carryLayer == minLayer){
                         atomicStore(&covers[0][localY], consume_input_layer_carry(tileId.y, localY));
-                        continue;
                     }
 
                     if (segmentLayer == minLayer) {
