@@ -30,18 +30,18 @@ pub struct Cassia {
 
 impl Cassia {
     pub fn new(width: usize, height: usize) -> Self {
-        #[cfg(target_os="macos")]
-        const CASSIA_LIB_NAME : &str = "../out/libcassia.dylib";
-        #[cfg(target_os="linux")]
-        const CASSIA_LIB_NAME : &str = "../out/libcassia.so";
+        #[cfg(target_os = "macos")]
+        const CASSIA_LIB_NAME: &str = "../out/libcassia.dylib";
+        #[cfg(target_os = "linux")]
+        const CASSIA_LIB_NAME: &str = "../out/libcassia.so";
 
         let cont: Container<CassiaSys> = unsafe { Container::load(CASSIA_LIB_NAME) }.unwrap();
 
-        unsafe { cont.cassia_init(width as u32, height as u32); }
-
-        Self {
-            cont,
+        unsafe {
+            cont.cassia_init(width as u32, height as u32);
         }
+
+        Self { cont }
     }
 
     pub fn render(&self, pixel_segments: &[CompactSegment], stylings: &[Styling]) {
@@ -58,6 +58,8 @@ impl Cassia {
 
 impl Drop for Cassia {
     fn drop(&mut self) {
-        unsafe { self.cont.cassia_shutdown(); }
+        unsafe {
+            self.cont.cassia_shutdown();
+        }
     }
 }

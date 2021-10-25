@@ -7,12 +7,12 @@ mod debugging {
     use super::*;
 
     use std::{fs::OpenOptions, io::Write};
-    
+
     use mold::Buffer;
 
     pub fn capture_to_file(width: usize, height: usize, composition: &mut Composition) {
         let mut buffer = vec![[255u8; 4]; width * height];
-    
+
         composition.render(
             Buffer {
                 buffer: &mut buffer,
@@ -22,7 +22,7 @@ mod debugging {
             [1.0, 1.0, 1.0, 1.0],
             None,
         );
-    
+
         let mut bytes = Vec::with_capacity(width * height * 3);
         for [r, g, b, _] in &buffer {
             bytes.push(*r);
@@ -40,10 +40,10 @@ mod debugging {
             .unwrap();
         output.write(&bytes).unwrap();
     }
-    
+
     pub fn segs_to_file(composition: &mut Composition) {
         let pixel_segments = composition.pixel_segments();
-    
+
         let new_path = "circles.segs";
         let mut output = OpenOptions::new()
             .write(true)
@@ -52,7 +52,7 @@ mod debugging {
             .unwrap();
         output.write(bytemuck::cast_slice(pixel_segments)).unwrap();
     }
-    
+
     pub fn stylings_to_file(stylings: &[Styling]) {
         let new_path = "circles.stylings";
         let mut output = OpenOptions::new()

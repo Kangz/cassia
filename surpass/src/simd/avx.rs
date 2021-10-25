@@ -10,8 +10,6 @@ use std::{
     ptr,
 };
 
-use crate::simd::MapSimd;
-
 #[derive(Clone, Copy, Debug)]
 pub struct m8x16(__m128i);
 
@@ -484,17 +482,5 @@ impl BitOrAssign for f32x8 {
 impl From<i32x8> for f32x8 {
     fn from(val: i32x8) -> Self {
         Self(unsafe { _mm256_cvtepi32_ps(val.0) })
-    }
-}
-
-impl MapSimd for [f32; 8] {
-    type Simd = f32x8;
-
-    fn map_simd<F: Fn(Self::Simd) -> Self::Simd>(&mut self, f: &F) {
-        unsafe {
-            let simd = f32x8(_mm256_load_ps(self.as_ptr()));
-
-            _mm256_store_ps(self.as_mut_ptr(), f(simd).0);
-        }
     }
 }

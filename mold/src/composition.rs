@@ -151,15 +151,35 @@ impl Composition {
     }
 
     pub fn pixel_segments(&mut self) -> &[CompactSegment] {
+        macro_rules! scoped {
+            ( $name:expr, $f:expr ) => {{
+                let start = std::time::Instant::now();
+                $f
+                let end = std::time::Instant::now();
+
+                println!(" - mold::{}", $name);
+                println!("   - CPU time: {}ms", (end - start).as_secs_f32() * 1000.0);
+            }};
+        }
+
         self.remove_disabled();
 
         let layers = &self.layers;
         let rasterizer = &mut self.rasterizer;
         take_builder!(self, |builder: LinesBuilder| {
-            let lines =
-                builder.build(|layer_id| layers.get(&layer_id).map(|layer| layer.inner.clone()));
+            println!("mold scopes:");
+            let lines;
+            scoped!("LinesBuilder::build", {
+                lines =
+                    builder.build(|layer_id| layers.get(&layer_id).map(|layer| layer.inner.clone()));
+            });
 
-            rasterizer.rasterize(&lines);
+            scoped!("Rasterizer::rasterize", {
+                rasterizer.rasterize(&lines);
+            });
+            scoped!("Rasterizer::sort", {
+                rasterizer.sort();
+            });
 
             lines.unwrap()
         });

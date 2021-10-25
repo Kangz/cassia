@@ -185,7 +185,7 @@ fn segment(
     let (ti, tj, tx, ty) = tiles(border_x, border_y, octant);
     let (area, cover) = area_cover(x0, x1, y0, y1, octant);
 
-    CompactSegment::new(0, tj, ti, layer, ty, tx, area, cover)
+    CompactSegment::new(0, tj, ti.max(-1) + 256, layer, ty, tx, area, cover)
 }
 
 #[derive(Debug, Default)]

@@ -145,27 +145,6 @@ namespace cassia {
             // Run all the steps of the algorithm.
             EncodingContext context(mDevice, mTimestampsSupported);
 
-            {
-                ScopedCPUPass pass(&context, "Cassia::ClampTileX To -1");
-
-                for (uint32_t i = 0; i < psegments.size(); i++) {
-                    PSegment* ps = reinterpret_cast<PSegment *>(&psegments[i]);
-
-                    // All negative tile Xs can just be the same
-                    if (ps->tile_x < 0)
-                        ps->tile_x = -1;
-
-                    // Offset tile X to ensure negative tile Xs are sorted to the front.
-                    ps->tile_x += TILE_X_OFFSET;
-                }
-            }
-
-            // Sort using the CPU for now.
-            {
-                ScopedCPUPass pass(&context, "Cassia::SortPSegments");
-                std::sort(psegments.begin(), psegments.end());
-            }
-
             wgpu::Buffer sortedPsegments;
             wgpu::Buffer stylingsBuffer;
             {

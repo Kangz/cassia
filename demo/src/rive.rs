@@ -2,7 +2,9 @@ use std::path;
 
 use std::{collections::HashMap, fs, mem, num::NonZeroU64, slice, time::Instant};
 
-use mold::{BlendMode, Buffer, Composition, Fill, Gradient, GradientBuilder, GradientType, Path, Point};
+use mold::{
+    BlendMode, Buffer, Composition, Fill, Gradient, GradientBuilder, GradientType, Path, Point,
+};
 use rive::{
     animation::{LinearAnimation, LinearAnimationInstance},
     layout::{self, Alignment, Fit},
@@ -172,7 +174,6 @@ impl Renderer for MoldRenderer {
                         },
                     );
                 }
-                
 
                 self.composition.insert_in_layer_transformed(
                     layer_id,
@@ -225,12 +226,11 @@ impl Renderer for MoldRenderer {
                     let end = transform * gradient.end;
 
                     let mut builder = GradientBuilder::new([start.x, start.y], [end.x, end.y]);
-                    builder
-                                    .r#type(match gradient.r#type {
-                                        rive::GradientType::Linear => GradientType::Linear,
-                                        rive::GradientType::Radial => GradientType::Radial,
-                                    });
-                    
+                    builder.r#type(match gradient.r#type {
+                        rive::GradientType::Linear => GradientType::Linear,
+                        rive::GradientType::Radial => GradientType::Radial,
+                    });
+
                     for &(color, stop) in gradient.stops.iter() {
                         builder.color_with_stop(to_linear(color), stop);
                     }
@@ -316,7 +316,9 @@ pub fn rive_main<P: AsRef<path::Path>>(path: P) {
             };
         }
 
-        mold_renderer.cassia.render(mold_renderer.composition.pixel_segments(), &stylings);
+        mold_renderer
+            .cassia
+            .render(mold_renderer.composition.pixel_segments(), &stylings);
 
         mold_renderer.reset();
 
