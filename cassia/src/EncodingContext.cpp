@@ -64,12 +64,15 @@ namespace cassia {
                     const uint64_t* gpuTimestamps = reinterpret_cast<const uint64_t*>(gpuTimestampBuffer.GetConstMappedRange());
                     std::cout << "Scopes:" << std::endl;
                     for (size_t i = 0; i < scopes.size(); i++) {
-                        float cpuTimeMs = (scopes[i].endCpuTimeNs - scopes[i].startCpuTimeNs) / 1000'000.0;
-                        float gpuTimeMs = (gpuTimestamps[i * 2 + 1] - gpuTimestamps[i * 2]) / 1000'000.0;
-
                         std::cout << " - " << scopes[i].name << std::endl;
+
+                        float cpuTimeMs = (scopes[i].endCpuTimeNs - scopes[i].startCpuTimeNs) / 1000'000.0;
                         std::cout << "   - CPU time: " << cpuTimeMs << "ms" << std::endl;
-                        std::cout << "   - GPU time: " << gpuTimeMs << "ms" << std::endl;
+
+                        if (scopes[i].hasGPU) {
+                            float gpuTimeMs = (gpuTimestamps[i * 2 + 1] - gpuTimestamps[i * 2]) / 1000'000.0;
+                            std::cout << "   - GPU time: " << gpuTimeMs << "ms" << std::endl;
+                        }
                     }
                 }
             };
@@ -84,7 +87,7 @@ namespace cassia {
         }
     }
 
-    void EncodingContext::OnStartPass(const char* name) {
+    void EncodingContext::OnStartPass(const char* name, bool hasGPU) {
         mEncoder.PushDebugGroup(name);
 
         if (!mGatherTimestamps) {
@@ -94,7 +97,10 @@ namespace cassia {
         mScopes.push_back({});
         mScopes.back().name = name;
         mScopes.back().startCpuTimeNs = GetNowAsNS();
-        mEncoder.WriteTimestamp(mGpuTimestamps, mScopes.size() * 2 - 2);
+        mScopes.back().hasGPU = hasGPU;
+        if (hasGPU) {
+            mEncoder.WriteTimestamp(mGpuTimestamps, mScopes.size() * 2 - 2);
+        }
     }
 
     void EncodingContext::OnEndPass() {
@@ -105,13 +111,25 @@ namespace cassia {
         }
 
         mScopes.back().endCpuTimeNs = GetNowAsNS();
-        mEncoder.WriteTimestamp(mGpuTimestamps, mScopes.size() * 2 - 1);
+        if (mScopes.back().hasGPU) {
+            mEncoder.WriteTimestamp(mGpuTimestamps, mScopes.size() * 2 - 1);
+        }
+    }
+
+    // ScopedCPUPass
+
+    ScopedCPUPass::ScopedCPUPass(EncodingContext* context, const char* name): mParentContext(context) {
+        mParentContext->OnStartPass(name, false);
+    }
+
+    ScopedCPUPass::~ScopedCPUPass() {
+        mParentContext->OnEndPass();
     }
 
     // ScopedComputePass
 
     ScopedComputePass::ScopedComputePass(EncodingContext* context, const char* name): mParentContext(context) {
-        mParentContext->OnStartPass(name);
+        mParentContext->OnStartPass(name, true);
         mPass = mParentContext->GetEncoder().BeginComputePass();
     }
 
@@ -127,7 +145,7 @@ namespace cassia {
     // ScopedRenderPass
 
     ScopedRenderPass::ScopedRenderPass(EncodingContext* context, const wgpu::RenderPassDescriptor& desc, const char* name): mParentContext(context) {
-        mParentContext->OnStartPass(name);
+        mParentContext->OnStartPass(name, true);
         mPass = mParentContext->GetEncoder().BeginRenderPass(&desc);
     }
 

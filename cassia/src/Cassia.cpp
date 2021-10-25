@@ -140,32 +140,44 @@ namespace cassia {
         ) {
             glfwPollEvents();
 
-            // Sort using the CPU for now.
             std::vector<uint64_t> psegments(psegmentsIn, psegmentsIn + psegmentCount);
-
-            
-            for (uint32_t i = 0; i < psegments.size(); i++) {
-                PSegment* ps = reinterpret_cast<PSegment *>(&psegments[i]);
-                
-                // All negative tile Xs can just be the same
-                if (ps->tile_x < 0)
-                    ps->tile_x = -1;
-
-                // Offset tile X to ensure negative tile Xs are sorted to the front.
-                ps->tile_x += TILE_X_OFFSET;
-            }
-
-            std::sort(psegments.begin(), psegments.end());
-
-            wgpu::Buffer sortedPsegments = utils::CreateBufferFromData(
-                    mDevice, psegments.data(), psegments.size() * sizeof(uint64_t),
-                    wgpu::BufferUsage::Storage);
-            wgpu::Buffer stylingsBuffer = utils::CreateBufferFromData(
-                    mDevice, stylings, stylingCount * sizeof(CassiaStyling),
-                    wgpu::BufferUsage::Storage);
 
             // Run all the steps of the algorithm.
             EncodingContext context(mDevice, mTimestampsSupported);
+
+            {
+                ScopedCPUPass pass(&context, "Cassia::ClampTileX To -1");
+
+                for (uint32_t i = 0; i < psegments.size(); i++) {
+                    PSegment* ps = reinterpret_cast<PSegment *>(&psegments[i]);
+
+                    // All negative tile Xs can just be the same
+                    if (ps->tile_x < 0)
+                        ps->tile_x = -1;
+
+                    // Offset tile X to ensure negative tile Xs are sorted to the front.
+                    ps->tile_x += TILE_X_OFFSET;
+                }
+            }
+
+            // Sort using the CPU for now.
+            {
+                ScopedCPUPass pass(&context, "Cassia::SortPSegments");
+                std::sort(psegments.begin(), psegments.end());
+            }
+
+            wgpu::Buffer sortedPsegments;
+            wgpu::Buffer stylingsBuffer;
+            {
+                ScopedCPUPass pass(&context, "Cassia::UploadBuffers");
+
+                sortedPsegments = utils::CreateBufferFromData(
+                        mDevice, psegments.data(), psegments.size() * sizeof(uint64_t),
+                        wgpu::BufferUsage::Storage);
+                stylingsBuffer = utils::CreateBufferFromData(
+                        mDevice, stylings, stylingCount * sizeof(CassiaStyling),
+                        wgpu::BufferUsage::Storage);
+            }
 
             // ----- THIS IS STUFF YOU CHANGE TO SELECT WHAT TO RUN
             Raster rasterOnScreen = RasterTile;

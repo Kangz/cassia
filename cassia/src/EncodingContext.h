@@ -16,10 +16,11 @@ namespace cassia {
         void SubmitOn(const wgpu::Queue& queue);
 
       private:
+        friend class ScopedCPUPass;
         friend class ScopedComputePass;
         friend class ScopedRenderPass;
 
-        void OnStartPass(const char* name);
+        void OnStartPass(const char* name, bool hasGPU);
         void OnEndPass();
 
         wgpu::CommandEncoder mEncoder;
@@ -29,11 +30,21 @@ namespace cassia {
             std::string name;
             uint64_t startCpuTimeNs;
             uint64_t endCpuTimeNs;
+            bool hasGPU;
         };
         std::vector<Scope> mScopes;
 
         bool mGatherTimestamps;
         wgpu::QuerySet mGpuTimestamps;
+    };
+
+    class ScopedCPUPass {
+      public:
+        ScopedCPUPass(EncodingContext* context, const char* name);
+        ~ScopedCPUPass();
+
+      private:
+        EncodingContext* mParentContext;
     };
 
     class ScopedComputePass {
