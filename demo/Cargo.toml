@@ -10,6 +10,8 @@ dlopen = "0.1"
 dlopen_derive = "0.1"
 mold = { path = "../mold" }
 rand = "0.8"
+rive = { path = "../rive-rs" }
+structopt = "0.3"
 
 [build-dependencies]
 cc = "1"

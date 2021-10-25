@@ -22,3 +22,4 @@ pub use utils::clear_buffer;
 pub use surpass::painter::{
     BlendMode, Fill, FillRule, Func, Gradient, GradientBuilder, GradientType, Props, Rect, Style,
 };
+pub use surpass::rasterizer::CompactSegment;

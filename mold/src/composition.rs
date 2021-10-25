@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use std::{borrow::Cow, cell::RefCell, rc::Rc};
+use std::{borrow::Cow, cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use rustc_hash::FxHashMap;
-use surpass::{self, LinesBuilder, painter::{BufferLayout, LayerProps, Props, Rect}, rasterizer::{self, CompactSegment, Rasterizer}};
+use surpass::{self, LinesBuilder, painter::{BufferLayout, LayerProps, Props, Rect, Style}, rasterizer::{self, CompactSegment, Rasterizer}};
 
 use crate::{
     buffer::{Buffer, BufferLayerCache},
@@ -28,7 +28,7 @@ pub struct Composition {
     rasterizer: Rasterizer,
     layers: FxHashMap<u16, Layer>,
     layer_ids: IdSet,
-    orders_to_layers: FxHashMap<u16, u16>,
+    orders_to_layers: BTreeMap<u16, u16>,
     layouts: FxHashMap<(*mut [u8; 4], usize), BufferLayout>,
     buffers_with_caches: Rc<RefCell<SmallBitSet>>,
 }
@@ -41,7 +41,7 @@ impl Composition {
             rasterizer: Rasterizer::new(),
             layers: FxHashMap::default(),
             layer_ids: IdSet::new(),
-            orders_to_layers: FxHashMap::default(),
+            orders_to_layers: BTreeMap::default(),
             layouts: FxHashMap::default(),
             buffers_with_caches: Rc::new(RefCell::new(SmallBitSet::default())),
         }
@@ -167,6 +167,28 @@ impl Composition {
         rasterizer.segments()
     }
 
+    pub fn compute_orders(&mut self) {
+        self.remove_disabled();
+        for (layer_id, layer) in &self.layers {
+            if layer.inner.is_enabled {
+                self.orders_to_layers.insert(
+                    layer.inner.order.expect("Layers should always have orders"),
+                    *layer_id,
+                );
+            }
+        }
+    }
+
+    pub fn props(&self) -> impl Iterator<Item = (u16, &Props)> + '_ {
+        self.orders_to_layers.iter().map(move |(&order, layer_id)| {
+            let props = self.layers
+                .get(layer_id)
+                .map(|layer| layer.props())
+                .expect("orders_to_layers points to non-existant Layer");
+            (order, props)
+        })
+    }
+
     pub fn render(
         &mut self,
         mut buffer: Buffer<'_>,
@@ -204,7 +226,7 @@ impl Composition {
 
         struct CompositionContext<'l> {
             layers: &'l FxHashMap<u16, Layer>,
-            orders_to_layers: &'l FxHashMap<u16, u16>,
+            orders_to_layers: &'l BTreeMap<u16, u16>,
             cache_id: Option<u8>,
         }
 

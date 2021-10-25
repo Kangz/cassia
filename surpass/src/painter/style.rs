@@ -89,7 +89,7 @@ pub struct Gradient {
     r#type: GradientType,
     start: [f32; 2],
     end: [f32; 2],
-    stops: Arc<[([f32; 4], f32)]>,
+    pub stops: Arc<[([f32; 4], f32)]>,
 }
 
 impl Gradient {
