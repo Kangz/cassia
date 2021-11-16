@@ -15,6 +15,8 @@ fn vs_main([[builtin(vertex_index)]] vertex_index: u32) -> VertexOutput {
     let pos: vec2<f32> = 2.0 * output.uv - vec2<f32>(1.0, 1.0);
     output.pos = vec4<f32>(pos.x, pos.y, 0.0, 1.0);
 
+    output.uv.y = 1.0 - output.uv.y;
+
     return output;
 }
 

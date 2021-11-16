@@ -7,10 +7,18 @@ mod compact_pixel_segment;
 
 pub use compact_pixel_segment::CompactPixelSegment;
 
-pub const TILE_WIDTH: usize = 8;
+pub const TILE_WIDTH: usize = 16;
 pub const TILE_WIDTH_SHIFT: u32 = TILE_WIDTH.trailing_zeros();
-pub const TILE_HEIGHT: usize = 8;
+pub const TILE_HEIGHT: usize = 4;
 pub const TILE_HEIGHT_SHIFT: u32 = TILE_HEIGHT.trailing_zeros();
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Style {
+    pub fill_rule: u32,
+    pub color: Color,
+    pub blend_mode: u32,
+}
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -75,10 +83,9 @@ impl Instance {
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         });
 
-        // let module = unsafe { device.create_shader_module_spirv(&wgpu::include_spirv_raw!("paint.spv")) };
         let module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("hardcoded.wgsl"))),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("paint.wgsl"))),
         });
 
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -109,11 +116,11 @@ impl Instance {
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         segments: &[CompactPixelSegment],
-        ranges: &[SegmentRange],
-        styles: &[Color],
+        styles: &[Style],
         width: u32,
         height: u32,
         clear_color: Color,
+        timestamp: Option<&wgpu::QuerySet>,
     ) {
         if segments.is_empty() || width == 0 || height == 0 {
             return;
@@ -152,11 +159,6 @@ impl Instance {
             contents: unsafe { as_byte_slice(segments) },
             usage: wgpu::BufferUsages::STORAGE,
         });
-        let ranges_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: unsafe { as_byte_slice(ranges) },
-            usage: wgpu::BufferUsages::STORAGE,
-        });
         let styles_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: unsafe { as_byte_slice(styles) },
@@ -193,6 +195,11 @@ impl Instance {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
         pass.set_pipeline(&self.compute_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
+
+        if let Some(timestamp) = timestamp {
+            pass.write_timestamp(&timestamp, 0);
+        }
+
         pass.dispatch(
             height / TILE_HEIGHT as u32
                 + (height % TILE_HEIGHT as u32 != 1)
@@ -201,5 +208,9 @@ impl Instance {
             1,
             1,
         );
+
+        if let Some(timestamp) = timestamp {
+            pass.write_timestamp(&timestamp, 1);
+        }
     }
 }

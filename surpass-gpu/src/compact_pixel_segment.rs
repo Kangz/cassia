@@ -1,11 +1,11 @@
 #[cfg(not(target_arch = "spirv"))]
 use core::convert::TryInto;
 
-use crate::{TILE_HEIGHT_SHIFT, TILE_WIDTH_SHIFT};
+use crate::{TILE_HEIGHT, TILE_HEIGHT_SHIFT, TILE_WIDTH, TILE_WIDTH_SHIFT};
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct c64 {
     #[cfg(target_endian = "little")]
     lo: u32,
@@ -13,6 +13,21 @@ pub struct c64 {
     #[cfg(target_endian = "big")]
     lo: u32,
 }
+
+// impl std::fmt::Debug for CompactPixelSegment {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("CompactPixelSegment")
+//             .field("is_none", &self.is_none())
+//             .field("tile_x", &self.tile_x())
+//             .field("tile_y", &self.tile_y())
+//             .field("layer_id", &self.layer_id())
+//             .field("local_x", &self.local_x())
+//             .field("local_y", &self.local_y())
+//             .field("area", &self.area())
+//             .field("cover", &self.cover())
+//             .finish()
+//     }
+// }
 
 trait Extract<T> {
     fn extract<const SHIFT: u32, const SIZE: u32>(self) -> T;
@@ -151,7 +166,7 @@ macro_rules! bitfields {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct CompactPixelSegment(c64);
 
 impl CompactPixelSegment {
@@ -166,6 +181,19 @@ impl CompactPixelSegment {
             area: i32[10],
             cover: i32[6],
         }
+    }
+
+    pub fn new_xy(x: i32, y: i32, layer_id: u32, area: i32, cover: i32) -> Self {
+        CompactPixelSegment::new(
+            0,
+            y >> TILE_HEIGHT_SHIFT,
+            (x >> TILE_WIDTH_SHIFT).max(-1) + 1,
+            layer_id,
+            y as u32 & (TILE_HEIGHT - 1) as u32,
+            x as u32 & (TILE_WIDTH - 1) as u32,
+            area,
+            cover,
+        )
     }
 }
 
